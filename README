@@ -6,27 +6,27 @@ regular expressions specified in the command line.
 The output is unsorted, but the order is deterministic across multiple runs:
 
     $ genex '\d' '[123abc]' # Must match both
-    1.0             "2"
-    1.0             "3"
-    1.0             "1"
+    1.00000000              "2"
+    1.00000000              "3"
+    1.00000000              "1"
 
 To enforce a fixed ordering for alternations, pipe the output to "sort -n":
 
     $ genex '(-|O){1,3}' | sort -n
-    1.0             "-"
-    1.4             "O"
-    2.2             "--"
-    2.30            "-O"
-    2.6             "O-"
-    2.70            "OO"
-    3.24            "---"
-    3.26            "--O"
-    3.34            "-O-"
-    3.36            "-OO"
-    3.64            "O--"
-    3.66            "O-O"
-    3.74            "OO-"
-    3.76            "OOO"
+    1.00000000              "-"
+    1.00000001              "O"
+    2.00000002              "--"
+    2.00000003              "O-"
+    2.00000006              "-O"
+    2.00000007              "OO"
+    3.00000010              "---"
+    3.00000011              "O--"
+    3.00000014              "-O-"
+    3.00000015              "OO-"
+    3.00000026              "--O"
+    3.00000027              "O-O"
+    3.00000030              "-OO"
+    3.00000031              "OOO"
 
 Output is currently capped at 65535 lines, with maximum string length
 capped at 255, but both can be raised if needed.

@@ -278,31 +278,14 @@ tryWith (len:lens) acc = if len > maxLength then return () else do
 disp' :: ([Word8], Word64) -> IO ()
 disp' (str, choices) = do
     putStr $ show (length str) ++ "."
-    putStr $ binToOct $ decToBin choices
+    let n = show choices
+    putStr (replicate (8 - length n) '0')
+    putStr n
     putStr "\t\t"
     print $ map chr str
     where
     chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
-
-binToOct []      = "0"
-binToOct [False] = "0"
-binToOct [True]  = "4"
-binToOct [False,False] = "0"
-binToOct [False,True]  = "2"
-binToOct [True,False]  = "4"
-binToOct [True,True]   = "6"
-binToOct (False:False:False:xs) = ('0':binToOct xs)
-binToOct (False:False:True:xs)  = ('1':binToOct xs)
-binToOct (False:True:False:xs)  = ('2':binToOct xs)
-binToOct (False:True:True:xs)   = ('3':binToOct xs)
-binToOct (True:False:False:xs)  = ('4':binToOct xs)
-binToOct (True:False:True:xs)   = ('5':binToOct xs)
-binToOct (True:True:False:xs)   = ('6':binToOct xs)
-binToOct (True:True:True:xs)    = ('7':binToOct xs)
-
-decToBin 0 = []
-decToBin y = let (a,b) = quotRem y 2 in ((b == 1):decToBin a)
 
 disp :: [Word8] -> IO ()
 disp str = do
