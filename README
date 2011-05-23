@@ -4,20 +4,40 @@ Currently, genex finds enumerations of strings that matches every regular
 expressions specified in the command line. The output is unsorted, but
 is deterministic (i.e. the same across multiple runs):
 
-    genex '\d' '[123abc]'
-    "2"
-    "3"
-    "1"
+    $ genex '\d' '[123abc]'
+    1.0 [2]
+    1.0 [3]
+    1.0 [1]
 
-The maximum output lines is currently capped at 65535 hits, with maximum
- string length capped at 255, but both can be raised if needed.
+To enforce a fixed alternation ordering, pipe the output to "sort -n":
+
+    $ genex '(-|O){1,3}' | sort -n
+    1.0     [-]
+    1.4     [O]
+    2.2     [--]
+    2.30    [-O]
+    2.6     [O-]
+    2.70    [OO]
+    3.24    [---]
+    3.26    [--O]
+    3.34    [-O-]
+    3.36    [-OO]
+    3.64    [O--]
+    3.66    [O-O]
+    3.74    [OO-]
+    3.76    [OOO]
+
+Output is currently capped at 65535 lines, with maximum string length
+capped at 255, but both can be raised if needed.
 
 The matches are generated lazily, so it makes sense to use "head -n" to
 show only part of its output:
 
     genex '[abc]+[123]+.+' | head -n 10
 
-Word boundaries and back references are fully supported.  Some caveats:
+Word boundaries and back references are fully supported as well.
+
+Some caveats:
 
 - The * and + quantifiers are turned into {0,3} and {1,4} to make the output
   more unique.
@@ -34,7 +54,7 @@ Required binary in PATH:
 
     yices2 # Download it from http://yices.csl.sri.com/download-yices2.shtml
 
-Usage:
+You can directly run the Main.hs in the checkout directory as well:
 
     runghc Main.hs 'your regex here'
 
