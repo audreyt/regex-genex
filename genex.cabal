@@ -2,7 +2,7 @@ Name            : regex-genex
 Version         : 0.1.20110523
 license         : OtherLicense
 license-file    : LICENSE
-cabal-version   : >= 1.2.3
+cabal-version   : >= 1.6
 copyright       : 2011 Audrey Tang
 maintainer      : Audrey Tang <audreyt@audreyt.org>
 category        : Text, Regex
@@ -20,3 +20,7 @@ executable genex
 
     build-depends:
         base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa
+
+source-repository head
+  type:     git
+  location: http://github.com/audreyt/regex-genex
