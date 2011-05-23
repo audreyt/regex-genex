@@ -2,7 +2,7 @@ Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
 The "genex" program finds permutations of strings that matches every
 regular expressions specified in the command line, with full support
-for back references and word boundaries.
+for back references (\1 .. \8) and word boundaries (\b).
 
 The output is unsorted, but the order is deterministic across multiple runs:
 
