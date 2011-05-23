@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, NamedFieldPuns #-}
+{-# LANGUAGE ImplicitParams, NamedFieldPuns, ParallelListComp #-}
 import Data.SBV
 import Data.Set (toList)
 import Data.List (sort, nub)
@@ -144,6 +144,9 @@ writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
 
 readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
     
+isPChar PChar{} = True
+isPChar _ = False
+
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
 match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
@@ -160,7 +163,13 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     PChar{ getPatternChar = ch } -> cond (ord ch .== cur)
     PConcat [] -> s
     PConcat [p] -> next p
-    PConcat ps -> step ps s
+    PConcat ps
+        | all isPChar ps -> ite (
+                ((pos + toEnum (length ps)) .<= strLen)
+                    &&&
+                (bAnd [ ord ch .== charAt (pos+i) | PChar{getPatternChar=ch} <- ps | i <- [0..] ])
+            ) s{ pos = pos + toEnum (length ps) } __FAIL__
+        | otherwise -> step ps s
         where
         step [] s' = s'
         step (p:ps) s' = 
