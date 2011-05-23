@@ -1,5 +1,29 @@
 Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
+Currently, genex finds enumerations of strings that matches every regular
+regressions specified in the command line. The output is unsorted, but
+is deterministic (i.e. the same across multiple runs):
+
+    genex '\d' '[123abc]'
+    "2"
+    "3"
+    "1"
+
+The maximum output lines is currently capped at 65535 hits, with maximum
+ string length capped at 255, but both can be raised if needed.
+
+The matches are generated lazily, so it makes sense to use "head -n" to
+show only part of its output:
+
+    genex '[abc]+[123]+.+' | head -n 10
+
+Word boundaries and back references are fully supported.  Some caveats:
+
+- The * and + quantifiers are turned into {0,3} and {1,4} to make output more unique.
+- The set of . \D \W \S characters are limited to printable characters, again to make the output more pretty.
+- No support yet for \l \u \L \U \Q \E (case and quotemeta modifiers)
+- No named Unicode properties or POSIX [[:upper:]] classes yet.
+
 Required Hackage libraries:
 
     sbv regex-tdfa
@@ -12,4 +36,7 @@ Usage:
 
     runghc Main.hs 'your regex here'
 
-Pre-built MacOSX binaries are in osx/; try "make test" for a sample run.
+Pre-built MacOSX binaries are in binaries/osx/; try "make test" for a sample run.
+
+Share and enjoy!
+Audrey
