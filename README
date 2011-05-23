@@ -1,31 +1,32 @@
 Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
-Currently, genex finds enumerations of strings that matches every regular
-expressions specified in the command line. The output is unsorted, but
-is deterministic (i.e. the same across multiple runs):
+The "genex" program finds enumerations of strings that matches every
+regular expressions specified in the command line.
 
-    $ genex '\d' '[123abc]'
-    1.0 [2]
-    1.0 [3]
-    1.0 [1]
+The output is unsorted, but the order is deterministic across multiple runs:
 
-To enforce a fixed alternation ordering, pipe the output to "sort -n":
+    $ genex '\d' '[123abc]' # Must match both
+    1.0             "2"
+    1.0             "3"
+    1.0             "1"
+
+To enforce a fixed ordering for alternations, pipe the output to "sort -n":
 
     $ genex '(-|O){1,3}' | sort -n
-    1.0     [-]
-    1.4     [O]
-    2.2     [--]
-    2.30    [-O]
-    2.6     [O-]
-    2.70    [OO]
-    3.24    [---]
-    3.26    [--O]
-    3.34    [-O-]
-    3.36    [-OO]
-    3.64    [O--]
-    3.66    [O-O]
-    3.74    [OO-]
-    3.76    [OOO]
+    1.0             "-"
+    1.4             "O"
+    2.2             "--"
+    2.30            "-O"
+    2.6             "O-"
+    2.70            "OO"
+    3.24            "---"
+    3.26            "--O"
+    3.34            "-O-"
+    3.36            "-OO"
+    3.64            "O--"
+    3.66            "O-O"
+    3.74            "OO-"
+    3.76            "OOO"
 
 Output is currently capped at 65535 lines, with maximum string length
 capped at 255, but both can be raised if needed.

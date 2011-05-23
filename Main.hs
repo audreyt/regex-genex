@@ -279,9 +279,8 @@ disp' :: ([Word8], Word64) -> IO ()
 disp' (str, choices) = do
     putStr $ show (length str) ++ "."
     putStr $ binToOct $ decToBin choices
-    putStr "\t["
-    putStr $ map chr str
-    putStr "]\n"
+    putStr "\t\t"
+    print $ map chr str
     where
     chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
