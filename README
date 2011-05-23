@@ -1,0 +1,11 @@
+Required Hackage libraries:
+
+    sbv regex-tdfa
+
+Required binary:
+
+    yices2
+
+Usage:
+
+    runghc genex.hs 'your regex here'
