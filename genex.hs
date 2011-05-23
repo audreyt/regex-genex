@@ -4,6 +4,9 @@ import Data.Set (toList)
 import Data.List (sort, nub)
 import Data.Bits
 import Data.Monoid
+import System.IO
+import Control.Monad (foldM)
+import Control.Monad.State
 import Control.Monad.Trans (MonadIO, liftIO)
 import qualified Data.Char
 import Text.Regex.TDFA.Pattern
@@ -11,86 +14,97 @@ import Text.Regex.TDFA.ReadRegex (parseRegex)
 import Test.QuickCheck (quickCheck)
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
+import Data.IntMap (IntMap)
+import qualified Data.IntMap as IntMap
 import System.Environment
 
 type Len = Int
 type Str = [SWord8]
 type Offset = SWord8
+type Flips = SWord64
+type Captures = SWord64
 
-maxHits = 30
+maxHits = 100
 minLength = 0
 maxLength = 100
-maxRepeat = 3
+maxRepeat = 3 -- 7 and 15 are also good
 
-defaultRegex = "abc$"
+lengths p = IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
+
+defaultRegex = "a(b|c)d{2,3}e*"
 parse r = case parseRegex r of
     Right (pattern, _) -> pattern
     Left x -> error $ show x
 
-possibleLengths :: Pattern -> IntSet
+type GroupLens = IntMap IntSet
+
+possibleLengths :: Pattern -> State GroupLens IntSet
 possibleLengths pat = case pat of
+    PGroup (Just idx) p -> do
+        lenP <- possibleLengths p
+        modify $ IntMap.insert idx lenP
+        return lenP
     PGroup _ p -> possibleLengths p
     PCarat{} -> zero
     PDollar{} -> zero
-    PQuest p -> possibleLengths p `mappend` zero
+    PQuest p -> fmap (`mappend` IntSet.singleton 0) $ possibleLengths p
     PDot{} -> one
-    POr ps -> mconcat (map possibleLengths ps)
+    POr ps -> fmap mconcat $ mapM possibleLengths ps
     PChar{} -> one
-    PConcat [] -> mempty
-    PConcat ps -> foldl1 sumSets (map possibleLengths ps)
+    PConcat [] -> return mempty
+    PConcat ps -> fmap (foldl1 sumSets) (mapM possibleLengths ps)
         where
         sumSets s1 s2 = IntSet.unions [ IntSet.map (+elm) s2 | elm <- IntSet.elems s1 ]
     PAny {} -> one
     PAnyNot {} -> one
-    PEscape {} -> one -- XXX Capture
-    {-
-    {getPatternChar = ch} -> case ch of
-        'n' -> cond (ord '\n' .== cur)
-        't' -> cond (ord '\t' .== cur)
-        'd' -> oneOf ['0'..'9']
-        'w' -> oneOf $ '_' : ['0'..'9'] ++ ['a'..'z'] ++ ['A'..'Z']
-        _ | Data.Char.isDigit ch -> 
-            let from = readCapture captureAt num
-                len = readCapture captureLen num
-                num = Data.Char.ord ch - Data.Char.ord '0'
-             in ite (matchCapture (from :: SWord8) len 0) s{ pos = pos+len } __FAIL__
-          | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
-          | otherwise  -> cond (ord ch .== cur)
-    -}
+    PEscape {getPatternChar = ch}
+        | ch `elem` "ntdws" -> one
+        | ch `elem` "b" -> zero
+        | Data.Char.isDigit ch -> gets (IntMap.findWithDefault (error $ "No such capture: " ++ [ch]) (charToDigit ch))
+        | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
+        | otherwise -> one
     PBound low (Just high) p -> manyTimes p low high
     PBound low _ p -> manyTimes p low (low+maxRepeat)
     PPlus p -> manyTimes p 1 (maxRepeat+1)
     PStar _ p -> manyTimes p 0 maxRepeat
     _ -> error $ show pat
     where
-    one = IntSet.singleton 1
-    zero = IntSet.singleton 0
-    manyTimes :: Pattern -> Int -> Int -> IntSet
-    manyTimes p low high = let lenP = possibleLengths p in 
-        IntSet.unions [ IntSet.map (*i) lenP | i <- [low..high] ]
+    one = return $ IntSet.singleton 1
+    zero = return $ IntSet.singleton 0
+    manyTimes p low high = do
+        lenP <- possibleLengths p
+        return $ IntSet.unions [ IntSet.map (*i) lenP | i <- [low..high] ]
 
-exactMatch :: (?pat :: Pattern) => Len -> Symbolic SBool
+charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
+
+exactMatch :: (?pats :: [Pattern]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars len
     initialBits <- free "bits"
-    let Status{ ok, pos, bits } = let ?str = str in match Status
+    let ?str = str
+    let initialStatus = Status
             { ok = true
-            , pos = 0
+            , pos = toEnum len
             , bits = initialBits
             , captureAt = minBound
             , captureLen = minBound
             }
-    return (bits .== 0 &&& pos .== toEnum len &&& ok)
+        runPat s pat = let ?pat = pat in
+            ite (ok s &&& pos s .== toEnum len)
+                (match s{ pos = 0, captureAt = minBound, captureLen = minBound })
+                s{ ok = false, pos = maxBound, bits = maxBound }
+    let finalStatus = foldl runPat initialStatus ?pats
+    return $
+        (bits finalStatus .== 0 &&& pos finalStatus .== toEnum len &&& ok finalStatus)
 
 data Status = Status
     { ok :: SBool
     , pos :: Offset
-    , bits :: SWord64
+    , bits :: Flips
     , captureAt :: Captures
     , captureLen :: Captures
     }
 
-type Captures = SWord64
 type Idx = Word8
 
 instance Mergeable Status where
@@ -102,7 +116,7 @@ instance Mergeable Status where
     , captureLen = symbolicMerge t (captureLen s1) (captureLen s2)
     }
 
-choice :: (?str :: Str, ?pat :: Pattern) => SWord64 -> [SWord64 -> Status] -> Status
+choice :: (?str :: Str, ?pat :: Pattern) => Flips -> [Flips -> Status] -> Status
 choice _ [] = error "X"
 choice bits [a] = a bits
 choice bits [a, b] = ite (lsb bits) (a bits') (b bits')
@@ -129,8 +143,8 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
         , captureLen = writeCapture captureLen idx (pos' - pos)
         }
     PGroup _ p -> next p
-    PCarat{} -> ite ((pos .== 0) ||| (charAt (pos-1) .== ord '\n')) s __FAIL__
-    PDollar{} -> ite ((pos .== toEnum (length ?str)) ||| (charAt (pos+1) .== ord '\n')) s __FAIL__
+    PCarat{} -> ite (isBegin ||| (charAt (pos-1) .== ord '\n')) s __FAIL__
+    PDollar{} -> ite (isEnd ||| (charAt (pos+1) .== ord '\n')) s __FAIL__
     PQuest p -> choice bits [\b -> let ?pat = p in match s{ bits = b }, const s]
     PDot{} -> cond (cur .>= ord ' ' &&& cur .<= ord '~')
     POr [p] -> next p
@@ -153,17 +167,20 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     PEscape {getPatternChar = ch} -> case ch of
         'n' -> cond (ord '\n' .== cur)
         't' -> cond (ord '\t' .== cur)
-        'd' -> oneOf ['0'..'9']
-        'w' -> oneOf $ '_' : ['0'..'9'] ++ ['a'..'z'] ++ ['A'..'Z']
+        'd' -> cond (ord '0' .<= cur &&& ord '9' .>= cur)
+        'w' -> ite (isWordCharAt pos) s{ pos = pos+1 } __FAIL__
+        's' -> cond (cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur))
+        'b' -> ite isWordBoundary s __FAIL__
         _ | Data.Char.isDigit ch -> 
             let from = readCapture captureAt num
                 len = readCapture captureLen num
-                num = Data.Char.ord ch - Data.Char.ord '0'
+                num = charToDigit ch
              in ite (matchCapture (from :: SWord8) len 0) s{ pos = pos+len } __FAIL__
           | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
           | otherwise  -> cond (ord ch .== cur)
-    PBound low (Just high) p -> manyTimes p [low..high]
-    PBound low _ p -> manyTimes p [low..low+maxRepeat]
+    PBound low (Just high) p -> let s'@Status{ ok = ok' } = (let ?pat = PConcat (replicate low p) in match s) in
+        ite ok' (let ?pat = p in manyTimes s' $ high - low) s'
+    PBound low _ p -> let ?pat = (PBound low (Just $ low+maxRepeat) p) in match s
     PPlus p ->
         let s'@Status{ ok = ok, pos = pos'} = next p
             res = let ?pat = PStar True p in match s'
@@ -174,9 +191,10 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     next p = let ?pat = p in match s
     isOutOfBounds = pos .> toEnum (length ?str)
     isFailedMatch = bnot ok
-    manyTimes :: (?pat :: Pattern, ?str :: Str) => Pattern -> [Int] -> Status
-    manyTimes p times = choice bits $
-        map (\iter -> \b -> let ?pat = PConcat (replicate iter p) in match s{ bits = b }) times
+    manyTimes s n
+        | n <= 0 = s
+        | otherwise = let s'@Status{ ok = ok' } = match s in
+            ite ok' (choice bits [\b -> s{ bits = b }, \b -> manyTimes s'{ bits = b } (n-1)]) s
     cur = charAt pos
     charAt = select ?str 0
     cond b = ite b s{ pos = pos+1 } __FAIL__
@@ -187,42 +205,60 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     matchCapture from len off = (len .<= off) |||
         (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (off+1))
     __FAIL__ = s{ ok = false, pos = maxBound, bits = maxBound }
+    isEnd = (pos .== toEnum (length ?str))
+    isBegin = (pos .== 0)
+    isWordCharAt at = let char = charAt at in
+        (char .>= ord 'A' &&& char .<= ord 'Z')
+            |||
+        (char .>= ord 'a' &&& char .<= ord 'z')
+            |||
+        (char .== ord '_')
+    isWordBoundary = case length ?str of
+        0 -> false
+        _ -> (isEnd &&& isWordCharAt (pos-1)) |||
+             (isBegin &&& isWordCharAt pos) |||
+             (isWordCharAt (pos-1) <+> isWordCharAt pos)
 
 main = do
+    hSetBuffering stdout NoBuffering
     args <- getArgs
     case args of
         [] -> do
             prog <- getProgName
             if prog == "<interactive>" then run defaultRegex else do
                 fail $ "Usage: " ++ prog ++ " regex [regex...]"
-        (r:_) -> run r
+        rx -> runMany rx
 
-run regex = do
-    let ?pat = parse regex
-    let lens = IntSet.toAscList $ possibleLengths ?pat
+runMany regexes = do
+    let ?pats = map parse regexes
+    let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map lenOf ?pats)
     tryWith lens 0
+    where
+    lenOf p = fst $ runState (possibleLengths p) mempty
 
-tryWith :: (?pat :: Pattern) => [Int] -> Int -> IO ()
+run :: String -> IO ()
+run regex = runMany [regex]
+
+tryWith :: (?pats :: [Pattern]) => [Int] -> Int -> IO ()
 tryWith [] acc = return ()
 tryWith (len:lens) acc = if len > maxLength then return () else do
-    allRes <- allSat $ exactMatch len
-    case allRes of 
-        AllSatResult [] -> tryWith lens acc
-        AllSatResult xs -> do
-            let models = (take (maxHits - acc) $ sort $ map getModel $ take maxHits xs)
-            mapM_ disp' models
-            let acc' = length models + acc
-            if (acc' >= maxHits) then return () else tryWith lens acc'
+    AllSatResult allRes <- allSat $ exactMatch len
+    showResult allRes acc
     where
-    fst' :: ([Word8], [Bool]) -> [Word8]
-    fst' = fst
+    showResult [] a = tryWith lens a
+    showResult (r:rs) a = do
+        disp' $ getModel r
+        if (a+1 >= maxHits) then return () else showResult rs (a+1)
 
 disp' :: ([Word8], Word64) -> IO ()
 disp' (str, choices) = do
+    print $ map chr str
+    {-
     putStr (show choices)
     putStr "\t["
     putStr $ map chr str
     putStr "]\n"
+    -}
     where
     chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
