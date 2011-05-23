@@ -79,27 +79,27 @@ charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 exactMatch :: (?pats :: [Pattern]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars len
-    initialBits <- free "bits"
+    initialFlips <- free "flips"
     let ?str = str
     let initialStatus = Status
             { ok = true
             , pos = toEnum len
-            , bits = initialBits
+            , flips = initialFlips
             , captureAt = minBound
             , captureLen = minBound
             }
         runPat s pat = let ?pat = pat in
             ite (ok s &&& pos s .== toEnum len)
                 (match s{ pos = 0, captureAt = minBound, captureLen = minBound })
-                s{ ok = false, pos = maxBound, bits = maxBound }
+                s{ ok = false, pos = maxBound, flips = maxBound }
     let finalStatus = foldl runPat initialStatus ?pats
     return $
-        (bits finalStatus .== 0 &&& pos finalStatus .== toEnum len &&& ok finalStatus)
+        (flips finalStatus .== 0 &&& pos finalStatus .== toEnum len &&& ok finalStatus)
 
 data Status = Status
     { ok :: SBool
     , pos :: Offset
-    , bits :: Flips
+    , flips :: Flips
     , captureAt :: Captures
     , captureLen :: Captures
     }
@@ -110,23 +110,32 @@ instance Mergeable Status where
   symbolicMerge t s1 s2 = Status
     { ok = symbolicMerge t (ok s1) (ok s2)
     , pos = symbolicMerge t (pos s1) (pos s2)
-    , bits = symbolicMerge t (bits s1) (bits s2)
+    , flips = symbolicMerge t (flips s1) (flips s2)
     , captureAt = symbolicMerge t (captureAt s1) (captureAt s2)
     , captureLen = symbolicMerge t (captureLen s1) (captureLen s2)
     }
 
 choice :: (?str :: Str, ?pat :: Pattern) => Flips -> [Flips -> Status] -> Status
 choice _ [] = error "X"
-choice bits [a] = a bits
-choice bits [a, b] = ite (lsb bits) (a bits') (b bits')
+choice flips [a] = a flips
+choice flips [a, b] = ite (lsb flips) (b flips') (a flips')
     where
-    bits' = bits `shiftR` 1
-choice bits xs = ite (lsb bits)
-    (choice bits' $ take half xs)
-    (choice bits' $ drop half xs)
+    flips' = flips `shiftR` 1
+    {-
+choice flips (x:xs) = ite (lsb flips) (choice flips' xs) (x flips')
     where
+    flips' = flips `shiftR` 1
+    -}
+choice flips xs = select (map ($ flips') xs) __FAIL__ thisFlip
+    where
+    __FAIL__ = Status{ ok = false, pos = maxBound, flips = maxBound, captureAt = minBound, captureLen = minBound }
+    bits = log2 $ length xs
     half = length xs `div` 2
-    bits' = bits `shiftR` 1
+    flips' = flips `shiftR` bits
+    thisFlip = (flips `shiftL` (64 - bits)) `shiftR` (64 - bits)
+
+log2 1 = 0
+log2 n = 1 + log2 ((n + 1) `div` 2)
 
 writeCapture :: Captures -> Int -> SWord8 -> Captures
 writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
@@ -136,7 +145,7 @@ writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
 readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
     
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
-match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
+match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
         { captureAt = writeCapture captureAt idx pos
         , captureLen = writeCapture captureLen idx (pos' - pos)
@@ -144,11 +153,12 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     PGroup _ p -> next p
     PCarat{} -> ite (isBegin ||| (charAt (pos-1) .== ord '\n')) s __FAIL__
     PDollar{} -> ite (isEnd ||| (charAt (pos+1) .== ord '\n')) s __FAIL__
-    PQuest p -> choice bits [\b -> let ?pat = p in match s{ bits = b }, const s]
+    PQuest p -> choice flips [\b -> let ?pat = p in match s{ flips = b }, \b -> s{ flips = b }]
     PDot{} -> cond isDot
     POr [p] -> next p
-    POr ps -> choice bits $ map (\p -> \b -> let ?pat = p in match s{ bits = b }) ps
+    POr ps -> choice flips $ map (\p -> \b -> let ?pat = p in match s{ flips = b }) ps
     PChar{ getPatternChar = ch } -> cond (ord ch .== cur)
+    PConcat [] -> s
     PConcat [p] -> next p
     PConcat ps -> step ps s
         where
@@ -185,7 +195,7 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
           | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
           | otherwise  -> cond (ord ch .== cur)
     PBound low (Just high) p -> let s'@Status{ ok = ok' } = (let ?pat = PConcat (replicate low p) in match s) in
-        ite ok' (let ?pat = p in manyTimes s' $ high - low) s'
+        ite ok' (let ?pat = p in (manyTimes s' $ high - low)) s'
     PBound low _ p -> let ?pat = (PBound low (Just $ low+maxRepeat) p) in match s
     PPlus p ->
         let s'@Status{ ok = ok, pos = pos'} = next p
@@ -196,12 +206,17 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     where
     next p = let ?pat = p in match s
     isDot = (cur .>= ord ' ' &&& cur .<= ord '~')
-    isOutOfBounds = pos .> toEnum (length ?str)
+    isOutOfBounds = pos .> strLen
+    strLen = toEnum (length ?str)
     isFailedMatch = bnot ok
-    manyTimes s n
+    manyTimes :: (?pat :: Pattern) => Status -> Int -> Status
+    manyTimes s@Status{flips} n
         | n <= 0 = s
-        | otherwise = let s'@Status{ ok = ok' } = match s in
-            ite ok' (choice bits [\b -> s{ bits = b }, \b -> manyTimes s'{ bits = b } (n-1)]) s
+        | otherwise = choice flips [\b -> s{ flips = b }, nextTime]
+            where
+            nextTime b = let s'@Status{ok,pos} = match s{ flips = b } in
+                ite (pos .<= strLen &&& ok) (manyTimes s' (n-1)) s'
+
     cur = charAt pos
     charAt = select ?str 0
     condChar ch = cond (ord ch .== cur)
@@ -212,7 +227,7 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     matchCapture :: SWord8 -> SWord8 -> SWord8 -> SBool
     matchCapture from len off = (len .<= off) |||
         (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (off+1))
-    __FAIL__ = s{ ok = false, pos = maxBound, bits = maxBound }
+    __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
     isEnd = (pos .== toEnum (length ?str))
     isBegin = (pos .== 0)
     isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
@@ -262,16 +277,33 @@ tryWith (len:lens) acc = if len > maxLength then return () else do
 
 disp' :: ([Word8], Word64) -> IO ()
 disp' (str, choices) = do
-    print $ map chr str
-    {-
-    putStr (show choices)
+    putStr $ show (length str) ++ "."
+    putStr $ binToOct $ decToBin choices
     putStr "\t["
     putStr $ map chr str
     putStr "]\n"
-    -}
     where
     chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
+
+binToOct []      = "0"
+binToOct [False] = "0"
+binToOct [True]  = "4"
+binToOct [False,False] = "0"
+binToOct [False,True]  = "2"
+binToOct [True,False]  = "4"
+binToOct [True,True]   = "6"
+binToOct (False:False:False:xs) = ('0':binToOct xs)
+binToOct (False:False:True:xs)  = ('1':binToOct xs)
+binToOct (False:True:False:xs)  = ('2':binToOct xs)
+binToOct (False:True:True:xs)   = ('3':binToOct xs)
+binToOct (True:False:False:xs)  = ('4':binToOct xs)
+binToOct (True:False:True:xs)   = ('5':binToOct xs)
+binToOct (True:True:False:xs)   = ('6':binToOct xs)
+binToOct (True:True:True:xs)    = ('7':binToOct xs)
+
+decToBin 0 = []
+decToBin y = let (a,b) = quotRem y 2 in ((b == 1):decToBin a)
 
 disp :: [Word8] -> IO ()
 disp str = do
