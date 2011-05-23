@@ -1,7 +1,7 @@
 Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
 Currently, genex finds enumerations of strings that matches every regular
-regressions specified in the command line. The output is unsorted, but
+expressions specified in the command line. The output is unsorted, but
 is deterministic (i.e. the same across multiple runs):
 
     genex '\d' '[123abc]'
@@ -19,8 +19,10 @@ show only part of its output:
 
 Word boundaries and back references are fully supported.  Some caveats:
 
-- The * and + quantifiers are turned into {0,3} and {1,4} to make output more unique.
-- The set of . \D \W \S characters are limited to printable characters, again to make the output more pretty.
+- The * and + quantifiers are turned into {0,3} and {1,4} to make the output
+  more unique.
+- The set of . \D \W \S characters are limited to printable characters,
+  again to make the output more pretty.
 - No support yet for \l \u \L \U \Q \E (case and quotemeta modifiers)
 - No named Unicode properties or POSIX [[:upper:]] classes yet.
 
