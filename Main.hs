@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, NamedFieldPuns, ParallelListComp #-}
+{-# LANGUAGE ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards #-}
 import Data.SBV
 import Data.Set (toList)
 import Data.List (sort, nub)
@@ -214,6 +214,8 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
                     &&&
                 (bAnd [ let ?pat = p in matchOne (charAt (pos+i)) | p <- ps | i <- [0..] ])
             ) s{ pos = pos + toEnum (length ps) } __FAIL__
+        | (ones@(_:_:_), rest) <- span isOne ps -> step [PConcat ones, PConcat rest] s
+        | (nones, rest@(_:_:_)) <- span (not . isOne) ps -> step (nones ++ [PConcat rest]) s
         | otherwise -> step ps s
         where
         step [] s' = s'
