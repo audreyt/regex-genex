@@ -23,9 +23,9 @@ type Offset = SWord8
 type Flips = SWord64
 type Captures = SWord64
 
-maxHits = 100
+maxHits = 65535
 minLength = 0
-maxLength = 100
+maxLength = 255
 maxRepeat = 3 -- 7 and 15 are also good
 
 lengths p = IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
@@ -57,7 +57,7 @@ possibleLengths pat = case pat of
     PAny {} -> one
     PAnyNot {} -> one
     PEscape {getPatternChar = ch}
-        | ch `elem` "ntdwsWSD" -> one
+        | ch `elem` "ntrfaedwsWSD" -> one
         | ch `elem` "b" -> zero
         | Data.Char.isDigit ch -> gets (IntMap.findWithDefault (error $ "No such capture: " ++ [ch]) (charToDigit ch))
         | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
@@ -164,13 +164,18 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
         PatternSet (Just cset) _ _ _ -> noneOf $ toList cset
         _ -> error "TODO"
     PEscape {getPatternChar = ch} -> case ch of
-        'n' -> cond (ord '\n' .== cur)
-        't' -> cond (ord '\t' .== cur)
-        'd' -> cond (ord '0' .<= cur &&& ord '9' .>= cur)
+        'n' -> condChar '\n'
+        't' -> condChar '\t'
+        'r' -> condChar '\r'
+        'f' -> condChar '\f'
+        'a' -> condChar '\a'
+        'e' -> condChar '\ESC'
+        'd' -> cond isDigit
         'w' -> cond (isWordCharAt pos)
         's' -> cond isWhiteSpace
         'W' -> cond (isDot &&& bnot (isWordCharAt pos))
         'S' -> cond (isDot &&& bnot isWhiteSpace)
+        'D' -> cond (isDot &&& bnot isDigit)
         'b' -> ite isWordBoundary s __FAIL__
         _ | Data.Char.isDigit ch -> 
             let from = readCapture captureAt num
@@ -199,6 +204,7 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
             ite ok' (choice bits [\b -> s{ bits = b }, \b -> manyTimes s'{ bits = b } (n-1)]) s
     cur = charAt pos
     charAt = select ?str 0
+    condChar ch = cond (ord ch .== cur)
     cond b = ite b s{ pos = pos+1 } __FAIL__
     oneOf cs = cond $ bOr [ ord ch .== cur | ch <- cs ]
     noneOf cs = cond $ bAnd ((cur .>= ord ' ') : (cur .<= ord '~') : [ ord ch ./= cur | ch <- cs ])
@@ -210,6 +216,7 @@ match s@Status{ ok, pos, bits, captureAt, captureLen } = ite (isFailedMatch ||| 
     isEnd = (pos .== toEnum (length ?str))
     isBegin = (pos .== 0)
     isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
+    isDigit = (ord '0' .<= cur &&& ord '9' .>= cur)
     isWordCharAt at = let char = charAt at in
         (char .>= ord 'A' &&& char .<= ord 'Z')
             |||
