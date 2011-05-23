@@ -1,7 +1,8 @@
 Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
 The "genex" program finds permutations of strings that matches every
-regular expressions specified in the command line.
+regular expressions specified in the command line, with full support
+for back references and word boundaries.
 
 The output is unsorted, but the order is deterministic across multiple runs:
 
@@ -31,25 +32,27 @@ To enforce a fixed ordering for alternations, pipe the output to "sort -n":
 Output is currently capped at 65535 lines, with maximum string length
 capped at 255, but both can be raised if needed.
 
-The matches are generated lazily, so it makes sense to use "head -n" to
-show only part of its output:
+Because genex generates matches lazily, we can use "head -n" to display
+only part of its output:
 
     genex '[abc]+[123]+.+' | head -n 10
 
-Word boundaries and back references are fully supported as well.
-
 Some caveats:
 
-- The * and + quantifiers are turned into {0,3} and {1,4} to make the output
-  more unique.
+- We translate * and + quantifiers into {0,3} and {1,4}, to make output
+  appear more unique.
+
 - The set of . \D \W \S characters are limited to printable characters,
   again to make the output more pretty.
+
+- The ^ and $ anchors are taken to mean begin-of-line and end-of-line
+  (implicit /m), since we already implicitly anchor on both ends.
+
 - No support yet for \l \u \L \U \Q \E (case and quotemeta modifiers)
+
 - No named Unicode properties or POSIX [[:upper:]] classes yet.
 
-Required Hackage libraries:
-
-    sbv regex-tdfa
+Required Hackage libraries: sbv regex-tdfa
 
 Required binary in PATH:
 
