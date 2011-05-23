@@ -1,3 +1,5 @@
+Available on Hackage as: http://hackage.haskell.org/package/regex-genex
+
 Required Hackage libraries:
 
     sbv regex-tdfa
