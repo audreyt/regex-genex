@@ -2,12 +2,12 @@ Required Hackage libraries:
 
     sbv regex-tdfa
 
-Required binary:
+Required binary in PATH:
 
-    yices2
+    yices2 # Download it from http://yices.csl.sri.com/download-yices2.shtml
 
 Usage:
 
-    runghc genex.hs 'your regex here'
+    runghc Main.hs 'your regex here'
 
 Pre-built MacOSX binaries are in osx/; try "make test" for a sample run.

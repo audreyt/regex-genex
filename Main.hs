@@ -11,7 +11,6 @@ import Control.Monad.Trans (MonadIO, liftIO)
 import qualified Data.Char
 import Text.Regex.TDFA.Pattern
 import Text.Regex.TDFA.ReadRegex (parseRegex)
-import Test.QuickCheck (quickCheck)
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
 import Data.IntMap (IntMap)
