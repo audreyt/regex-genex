@@ -39,6 +39,7 @@ type GroupLens = IntMap IntSet
 
 possibleLengths :: Pattern -> State GroupLens IntSet
 possibleLengths pat = case pat of
+    _ | isOne pat -> one
     PGroup (Just idx) p -> do
         lenP <- possibleLengths p
         modify $ IntMap.insert idx lenP
@@ -47,15 +48,11 @@ possibleLengths pat = case pat of
     PCarat{} -> zero
     PDollar{} -> zero
     PQuest p -> fmap (`mappend` IntSet.singleton 0) $ possibleLengths p
-    PDot{} -> one
     POr ps -> fmap mconcat $ mapM possibleLengths ps
-    PChar{} -> one
     PConcat [] -> return mempty
     PConcat ps -> fmap (foldl1 sumSets) (mapM possibleLengths ps)
         where
         sumSets s1 s2 = IntSet.unions [ IntSet.map (+elm) s2 | elm <- IntSet.elems s1 ]
-    PAny {} -> one
-    PAnyNot {} -> one
     PEscape {getPatternChar = ch}
         | ch `elem` "ntrfaedwsWSD" -> one
         | ch `elem` "b" -> zero
@@ -144,11 +141,61 @@ writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
 
 readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
     
-isPChar PChar{} = True
-isPChar _ = False
+isOne PChar{} = True
+isOne PDot{} = True
+isOne PAny {} = True
+isOne PAnyNot {} = True
+isOne (PGroup Nothing p) = isOne p
+isOne PEscape {getPatternChar = ch}
+    | ch `elem` "ntrfaedwsWSD" = True
+    | ch `elem` "b" = False
+    | Data.Char.isDigit ch = False
+    | Data.Char.isAlpha ch = error $ "Unsupported escape: " ++ [ch]
+    | otherwise = True
+isOne _ = False
+
+matchOne :: (?pat :: Pattern) => SWord8 -> SBool
+matchOne cur = case ?pat of
+    PChar {getPatternChar = ch} -> isChar ch
+    PDot{} -> isDot
+    PGroup Nothing p -> let ?pat = p in matchOne cur
+    PAny {getPatternSet = pset} -> case pset of
+        PatternSet (Just cset) _ _ _ -> oneOf $ toList cset
+        _ -> error "TODO"
+    PAnyNot {getPatternSet = pset} -> case pset of
+        PatternSet (Just cset) _ _ _ -> noneOf $ toList cset
+        _ -> error "TODO"
+    PEscape {getPatternChar = ch} -> case ch of
+        'n' -> isChar '\n'
+        't' -> isChar '\t'
+        'r' -> isChar '\r'
+        'f' -> isChar '\f'
+        'a' -> isChar '\a'
+        'e' -> isChar '\ESC'
+        'd' -> isDigit
+        'w' -> isWordChar
+        's' -> isWhiteSpace
+        'W' -> (isDot &&& bnot isWordChar)
+        'S' -> (isDot &&& bnot isWhiteSpace)
+        'D' -> (isDot &&& bnot isDigit)
+        _   -> isChar ch
+    _ -> false
+    where
+    ord = toEnum . Data.Char.ord
+    isChar ch = cur .== ord ch
+    isDot = (cur .>= ord ' ' &&& cur .<= ord '~')
+    oneOf cs = bOr [ ord ch .== cur | ch <- cs ]
+    noneOf cs = bAnd ((cur .>= ord ' ') : (cur .<= ord '~') : [ ord ch ./= cur | ch <- cs ])
+    isDigit = (ord '0' .<= cur &&& ord '9' .>= cur)
+    isWordChar = (cur .>= ord 'A' &&& cur .<= ord 'Z')
+             ||| (cur .>= ord 'a' &&& cur .<= ord 'z')
+             ||| (cur .== ord '_')
+    isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
+
 
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
 match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
+    _ | isOne ?pat -> one
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
         { captureAt = writeCapture captureAt idx pos
         , captureLen = writeCapture captureLen idx (pos' - pos)
@@ -157,17 +204,15 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     PCarat{} -> ite (isBegin ||| (charAt (pos-1) .== ord '\n')) s __FAIL__
     PDollar{} -> ite (isEnd ||| (charAt (pos+1) .== ord '\n')) s __FAIL__
     PQuest p -> choice flips [\b -> let ?pat = p in match s{ flips = b }, \b -> s{ flips = b }]
-    PDot{} -> cond isDot
     POr [p] -> next p
     POr ps -> choice flips $ map (\p -> \b -> let ?pat = p in match s{ flips = b }) ps
-    PChar{ getPatternChar = ch } -> cond (ord ch .== cur)
     PConcat [] -> s
     PConcat [p] -> next p
     PConcat ps
-        | all isPChar ps -> ite (
+        | all isOne ps -> ite (
                 ((pos + toEnum (length ps)) .<= strLen)
                     &&&
-                (bAnd [ ord ch .== charAt (pos+i) | PChar{getPatternChar=ch} <- ps | i <- [0..] ])
+                (bAnd [ let ?pat = p in matchOne (charAt (pos+i)) | p <- ps | i <- [0..] ])
             ) s{ pos = pos + toEnum (length ps) } __FAIL__
         | otherwise -> step ps s
         where
@@ -176,25 +221,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
             let s''@Status{ ok } = let ?pat = p in match s'
                 res = step ps s''
              in ite ok res __FAIL__
-    PAny {getPatternSet = pset} -> case pset of
-        PatternSet (Just cset) _ _ _ -> oneOf $ toList cset
-        _ -> error "TODO"
-    PAnyNot {getPatternSet = pset} -> case pset of
-        PatternSet (Just cset) _ _ _ -> noneOf $ toList cset
-        _ -> error "TODO"
     PEscape {getPatternChar = ch} -> case ch of
-        'n' -> condChar '\n'
-        't' -> condChar '\t'
-        'r' -> condChar '\r'
-        'f' -> condChar '\f'
-        'a' -> condChar '\a'
-        'e' -> condChar '\ESC'
-        'd' -> cond isDigit
-        'w' -> cond (isWordCharAt pos)
-        's' -> cond isWhiteSpace
-        'W' -> cond (isDot &&& bnot (isWordCharAt pos))
-        'S' -> cond (isDot &&& bnot isWhiteSpace)
-        'D' -> cond (isDot &&& bnot isDigit)
         'b' -> ite isWordBoundary s __FAIL__
         _ | Data.Char.isDigit ch -> 
             let from = readCapture captureAt num
@@ -213,6 +240,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     PStar _ p -> next $ PBound 0 Nothing p
     _ -> error $ show ?pat
     where
+    one = cond $ matchOne cur
     next p = let ?pat = p in match s
     isDot = (cur .>= ord ' ' &&& cur .<= ord '~')
     isOutOfBounds = pos .> strLen
@@ -239,8 +267,6 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
     isEnd = (pos .== toEnum (length ?str))
     isBegin = (pos .== 0)
-    isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
-    isDigit = (ord '0' .<= cur &&& ord '9' .>= cur)
     isWordCharAt at = let char = charAt at in
         (char .>= ord 'A' &&& char .<= ord 'Z')
             |||
