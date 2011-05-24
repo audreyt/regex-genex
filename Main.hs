@@ -77,25 +77,31 @@ exactMatch :: (?pats :: [Pattern]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars len
     initialFlips <- free "flips"
+    lenVar <- free "len"
+
+    let allZero off = (off .== toEnum len) |||
+            bAnd [select str 0 (off+toEnum i) .== 0 | i <- [0..len]]
+
     let ?str = str
     let initialStatus = Status
             { ok = true
-            , pos = toEnum len
+            , pos = 0
             , flips = initialFlips
             , captureAt = minBound
             , captureLen = minBound
+            , strLen = lenVar
             }
         runPat s pat = let ?pat = pat in
-            ite (ok s &&& pos s .== toEnum len)
+            ite (pos s .<= lenVar &&& ok s)
                 (match s{ pos = 0, captureAt = minBound, captureLen = minBound })
                 s{ ok = false, pos = maxBound, flips = maxBound }
-    let finalStatus = foldl runPat initialStatus ?pats
-    return $
-        (flips finalStatus .== 0 &&& pos finalStatus .== toEnum len &&& ok finalStatus)
+    let finalStatus@Status{ flips, pos, ok } = foldl runPat initialStatus ?pats
+    return $ (lenVar .<= toEnum len &&& allZero lenVar &&& lenVar .== pos &&& flips .== 0 &&& ok)
 
 data Status = Status
     { ok :: SBool
     , pos :: Offset
+    , strLen :: Offset
     , flips :: Flips
     , captureAt :: Captures
     , captureLen :: Captures
@@ -110,6 +116,7 @@ instance Mergeable Status where
     , flips = symbolicMerge t (flips s1) (flips s2)
     , captureAt = symbolicMerge t (captureAt s1) (captureAt s2)
     , captureLen = symbolicMerge t (captureLen s1) (captureLen s2)
+    , strLen = symbolicMerge t (strLen s1) (strLen s2)
     }
 
 choice :: (?str :: Str, ?pat :: Pattern) => Flips -> [Flips -> Status] -> Status
@@ -118,14 +125,9 @@ choice flips [a] = a flips
 choice flips [a, b] = ite (lsb flips) (b flips') (a flips')
     where
     flips' = flips `shiftR` 1
-    {-
-choice flips (x:xs) = ite (lsb flips) (choice flips' xs) (x flips')
-    where
-    flips' = flips `shiftR` 1
-    -}
 choice flips xs = select (map ($ flips') xs) __FAIL__ thisFlip
     where
-    __FAIL__ = Status{ ok = false, pos = maxBound, flips = maxBound, captureAt = minBound, captureLen = minBound }
+    __FAIL__ = Status{ ok = false, pos = maxBound, flips = maxBound, captureAt = minBound, captureLen = minBound, strLen = 0 }
     bits = log2 $ length xs
     half = length xs `div` 2
     flips' = flips `shiftR` bits
@@ -194,7 +196,7 @@ matchOne cur = case ?pat of
 
 
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
-match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
+match s@Status{ ok, pos, flips, captureAt, captureLen, strLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
     _ | isOne ?pat -> one
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
         { captureAt = writeCapture captureAt idx pos
@@ -246,7 +248,6 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     next p = let ?pat = p in match s
     isDot = (cur .>= ord ' ' &&& cur .<= ord '~')
     isOutOfBounds = pos .> strLen
-    strLen = toEnum (length ?str)
     isFailedMatch = bnot ok
     manyTimes :: (?pat :: Pattern) => Status -> Int -> Status
     manyTimes s@Status{flips} n
@@ -267,7 +268,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     matchCapture from len off = (len .<= off) |||
         (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (off+1))
     __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
-    isEnd = (pos .== toEnum (length ?str))
+    isEnd = (pos .== strLen)
     isBegin = (pos .== 0)
     isWordCharAt at = let char = charAt at in
         (char .>= ord 'A' &&& char .<= ord 'Z')
@@ -275,11 +276,10 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
         (char .>= ord 'a' &&& char .<= ord 'z')
             |||
         (char .== ord '_')
-    isWordBoundary = case length ?str of
-        0 -> false
-        _ -> (isEnd &&& isWordCharAt (pos-1)) |||
-             (isBegin &&& isWordCharAt pos) |||
-             (isWordCharAt (pos-1) <+> isWordCharAt pos)
+    isWordBoundary = ite (strLen .== 0) false $
+        (isEnd &&& isWordCharAt (pos-1)) |||
+        (isBegin &&& isWordCharAt pos) |||
+        (isWordCharAt (pos-1) <+> isWordCharAt pos)
 
 main = do
     hSetBuffering stdout NoBuffering
@@ -294,7 +294,7 @@ main = do
 runMany regexes = do
     let ?pats = map parse regexes
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map lenOf ?pats)
-    tryWith lens 0
+    tryWith [last lens `min` maxLength] 0
     where
     lenOf p = fst $ runState (possibleLengths p) mempty
 
@@ -312,14 +312,14 @@ tryWith (len:lens) acc = if len > maxLength then return () else do
         disp' $ getModel r
         if (a+1 >= maxHits) then return () else showResult rs (a+1)
 
-disp' :: ([Word8], Word64) -> IO ()
-disp' (str, choices) = do
-    putStr $ show (length str) ++ "."
+disp' :: ([Word8], Word64, Word8) -> IO ()
+disp' (str, choices, strLen) = do
+    putStr $ show strLen ++ "."
     let n = show choices
     putStr (replicate (8 - length n) '0')
     putStr n
     putStr "\t\t"
-    print $ map chr str
+    print $ map chr (take (fromEnum strLen) str)
     where
     chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
