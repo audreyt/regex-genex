@@ -38,13 +38,34 @@ parse r = case parseRegex r of
     Left x -> error $ show x
 
 type GroupLens = IntMap IntSet
+type BackReferences = IntSet
 
-possibleLengths :: Pattern -> State GroupLens IntSet
+simplify :: (?refs :: BackReferences) => Pattern -> Pattern
+simplify pat = case pat of
+    PGroup (Just idx) p -> if idx `IntSet.member` ?refs then PGroup (Just idx) (simplify p) else simplify p
+    PGroup _ p -> simplify p
+    PQuest p -> case simplify p of
+        PEmpty -> PEmpty
+        p'     -> PQuest p'
+    POr [] -> PEmpty
+    POr [p] -> simplify p
+    POr ps -> POr (map simplify ps)
+    PConcat [] -> PEmpty
+    PConcat [p] -> simplify p
+    PConcat ps -> PConcat (map simplify ps)
+    PBound low (Just high) p
+        | high == low -> simplify $ PConcat (replicate low (simplify p))
+    PBound low high p -> PBound low high (simplify p)
+    PPlus p -> PPlus (simplify p)
+    PStar x p -> PStar x (simplify p)
+    _ -> pat
+
+possibleLengths :: Pattern -> State (GroupLens, BackReferences) IntSet
 possibleLengths pat = case pat of
     _ | isOne pat -> one
     PGroup (Just idx) p -> do
         lenP <- possibleLengths p
-        modify $ IntMap.insert idx lenP
+        modify $ \(g, b) -> (IntMap.insert idx lenP g, b)
         return lenP
     PGroup _ p -> possibleLengths p
     PCarat{} -> zero
@@ -56,7 +77,10 @@ possibleLengths pat = case pat of
     PEscape {getPatternChar = ch}
         | ch `elem` "ntrfaedwsWSD" -> one
         | ch `elem` "b" -> zero
-        | Data.Char.isDigit ch -> gets (IntMap.findWithDefault (error $ "No such capture: " ++ [ch]) (charToDigit ch))
+        | Data.Char.isDigit ch -> do
+            let num = charToDigit ch
+            modify $ \(g, b) -> (g, IntSet.insert num b)
+            gets $ (IntMap.findWithDefault (IntSet.singleton 0) num) . fst
         | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
         | otherwise -> one
     PBound low (Just high) p -> manyTimes p low high
@@ -295,11 +319,15 @@ main = do
         rx -> runMany rx
 
 runMany regexes = do
-    let ?pats = map parse regexes
-    let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map lenOf ?pats)
+    let whee = [ (p', lens)
+               | p <- [ if r == "" then PEmpty else parse r | r <- regexes ]
+               , let (lens, (_, backRefs)) = runState (possibleLengths p) mempty
+               , let p' = let ?refs = backRefs in simplify p
+               ]
+    let ?pats = map fst whee
+    -- print ?pats
+    let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd whee)
     tryWith (filter (<= maxLength) lens) 0
-    where
-    lenOf p = fst $ runState (possibleLengths p) mempty
 
 run :: String -> IO ()
 run regex = runMany [regex]
