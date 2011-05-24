@@ -22,15 +22,21 @@ type SChar = SWord8
 type Str = [SChar]
 type Offset = SWord8
 type Flips = SWord64
-type Captures = SWord64
+type Captures = SFunArray Word8 Word8
 
 maxHits = 65535
 minLength = 0
 maxLength = 255
 maxRepeat = 3 -- 7 and 15 are also good
 
-lengths p = IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
-minLen p = IntSet.findMin . fst $ runState (possibleLengths p) mempty
+lengths p = let ?grp = mempty in IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
+
+minLen :: (?grp :: GroupLens) => Pattern -> Int
+minLen p = case p of
+    PEscape {getPatternChar = ch}
+        | Data.Char.isDigit ch -> let num = charToDigit ch in
+            IntSet.findMin (IntMap.findWithDefault (IntSet.singleton 0) num ?grp)
+    _ -> IntSet.findMin . fst $ runState (possibleLengths p) mempty
 
 defaultRegex = "a(b|c)d{2,3}e*"
 parse r = case parseRegex r of
@@ -71,7 +77,7 @@ simplify pat = case pat of
     PStar x p -> PStar x (simplify p)
     _ -> pat
 
-possibleLengths :: Pattern -> State (GroupLens, BackReferences) IntSet
+possibleLengths :: (?grp :: GroupLens) => Pattern -> State (GroupLens, BackReferences) IntSet
 possibleLengths pat = case pat of
     _ | isOne pat -> one
     PGroup (Just idx) p -> do
@@ -81,7 +87,7 @@ possibleLengths pat = case pat of
     PGroup _ p -> possibleLengths p
     PCarat{} -> zero
     PDollar{} -> zero
-    PQuest p -> fmap (`mappend` IntSet.singleton 0) $ possibleLengths p
+    PQuest p -> maybeGroup p (`mappend` zeroSet)
     POr ps -> fmap mconcat $ mapM possibleLengths ps
     PConcat [] -> zero
     PConcat ps -> fmap (foldl1 sumSets) (mapM possibleLengths ps)
@@ -91,7 +97,7 @@ possibleLengths pat = case pat of
         | Data.Char.isDigit ch -> do
             let num = charToDigit ch
             modify $ \(g, b) -> (g, IntSet.insert num b)
-            gets $ (IntMap.findWithDefault (IntSet.singleton 0) num) . fst
+            gets $ (IntMap.findWithDefault (IntMap.findWithDefault (error $ "No such capture: " ++ [ch]) num ?grp) num) . fst
         | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
         | otherwise -> one
     PBound low (Just high) p -> manyTimes p low high
@@ -103,28 +109,38 @@ possibleLengths pat = case pat of
     where
     one = return $ IntSet.singleton 1
     zero = return $ IntSet.singleton 0
+    zeroSet = IntSet.singleton 0
     sumSets s1 s2 = IntSet.unions [ IntSet.map (+elm) s2 | elm <- IntSet.elems s1 ]
-    manyTimes p low high = do
+    manyTimes p low high = maybeGroup p $ \lenP -> IntSet.unions
+        [ foldl sumSets (IntSet.singleton 0) (replicate i lenP)
+        | i <- [low..high]
+        ]
+    maybeGroup p@(PGroup (Just idx) _) f = do
         lenP <- possibleLengths p
-        return $ IntSet.unions [ foldl sumSets (IntSet.singleton 0) (replicate i lenP) | i <- [low..high] ]
+        let lenP' = f lenP
+        modify $ \(g, b) -> (IntMap.insert idx lenP' g, b)
+        return lenP'
+    maybeGroup p f = fmap f (possibleLengths p)
 
 charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 
-exactMatch :: (?pats :: [Pattern]) => Len -> Symbolic SBool
+exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars len
     initialFlips <- free "flips"
+    at' <- newArray_ (Just minBound)
+    len' <- newArray_ (Just minBound)
     let ?str = str
     let initialStatus = Status
             { ok = true
             , pos = toEnum len
             , flips = initialFlips
-            , captureAt = minBound
-            , captureLen = minBound
+            , captureAt = at'
+            , captureLen = writeCapture len' 1 1
             }
-        runPat s pat = let ?pat = pat in
+        runPat s (pat, groupLens) = let ?pat = pat in let ?grp = groupLens in
             ite (ok s &&& pos s .== toEnum len)
-                (match s{ pos = 0, captureAt = minBound, captureLen = minBound })
+                (match s{ pos = 0, captureAt = at', captureLen = len' })
                 s{ ok = false, pos = maxBound, flips = maxBound }
     let finalStatus@Status{ ok, pos, flips } = foldl runPat initialStatus ?pats
     return (flips .== 0 &&& pos .== toEnum len &&& ok)
@@ -157,9 +173,9 @@ choice flips (x:xs) = ite (lsb flips) (choice flips' xs) (x flips')
     where
     flips' = flips `shiftR` 1
     -}
-choice flips xs = select (map ($ flips') xs) __FAIL__ thisFlip
+choice flips xs = select (map ($ flips') xs) (head xs thisFlip){ ok = false } thisFlip
     where
-    __FAIL__ = Status{ ok = false, pos = maxBound, flips = maxBound, captureAt = minBound, captureLen = minBound }
+--     __FAIL__ = Status{ ok = false, pos = maxBound, flips = maxBound, captureAt = emptyCapture, captureLen = emptyCapture }
     bits = log2 $ length xs
     half = length xs `div` 2
     flips' = flips `shiftR` bits
@@ -169,11 +185,16 @@ log2 1 = 0
 log2 n = 1 + log2 ((n + 1) `div` 2)
 
 writeCapture :: Captures -> Int -> Offset -> Captures
+writeCapture cap idx val = writeArray cap (toEnum idx) val
+-- writeCapture cap idx val = (take (idx-1) (cap ++ [0..])) ++ (val : drop idx cap)
+{-
 writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
     where
     writeBit c (i, bit) = setBitTo c (idx * 8 + i) bit
+-}
 
-readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
+readCapture a = readArray a . toEnum
+--readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
     
 isOne PChar{} = True
 isOne PDot{} = True
@@ -227,14 +248,15 @@ matchOne cur = case ?pat of
     isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
 
 
-match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
+match :: (?str :: Str, ?pat :: Pattern, ?grp :: GroupLens) => Status -> Status
 match s@Status{ ok, pos, flips, captureAt, captureLen }
   | isOne ?pat = ite (pos .>= strLen) __FAIL__ one
   | otherwise = ite (pos + (toEnum $ minLen ?pat) .> strLen) __FAIL__ $ case ?pat of
-    PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
-        { captureAt = writeCapture captureAt idx pos
-        , captureLen = writeCapture captureLen idx (pos' - pos)
-        }
+    PGroup (Just idx) p -> let s'@Status{ pos = pos', ok = ok' } = next p in 
+        ite ok' (s'
+            { captureAt = writeCapture captureAt idx pos
+            , captureLen = writeCapture captureLen idx (pos' - pos)
+            }) __FAIL__
     PGroup _ p -> next p
     PCarat{} -> ite (isBegin ||| (charAt (pos-1) .== ord '\n')) s __FAIL__
     PDollar{} -> ite (isEnd ||| (charAt (pos+1) .== ord '\n')) s __FAIL__
@@ -265,7 +287,12 @@ match s@Status{ ok, pos, flips, captureAt, captureLen }
         'b' -> ite isWordBoundary s __FAIL__
         _ | Data.Char.isDigit ch -> 
             let from = readCapture captureAt num
-                len = readCapture captureLen num
+                Just defaultLen = IntMap.lookup num ?grp 
+                possibleLens = IntSet.toList defaultLen
+                len = case possibleLens of
+                    []  -> 0
+                    [l] -> toEnum l
+                    _   -> readCapture captureLen num
                 num = charToDigit ch
              in ite (matchCapture (from :: Offset) len 0) s{ pos = pos+len } __FAIL__
           | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
@@ -302,8 +329,12 @@ match s@Status{ ok, pos, flips, captureAt, captureLen }
     oneOf cs = cond $ bOr [ ord ch .== cur | ch <- cs ]
     noneOf cs = cond $ bAnd ((cur .>= ord ' ') : (cur .<= ord '~') : [ ord ch ./= cur | ch <- cs ])
     ord = toEnum . Data.Char.ord
-    matchCapture from len off = (len .<= off) |||
-        (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (off+1))
+    matchCapture :: Offset -> Offset -> Int -> SBool
+    matchCapture from len n
+        | n >= (length ?str) = true
+        | otherwise = (len .<= off) ||| (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (n+1))
+        where
+        off = toEnum n
     __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
     isEnd = (pos .== toEnum (length ?str))
     isBegin = (pos .== 0)
@@ -322,6 +353,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen }
 main = do
     hSetBuffering stdout NoBuffering
     args <- getArgs
+    let ?grp = mempty
     case args of
         [] -> do
             prog <- getProgName
@@ -330,9 +362,9 @@ main = do
         rx -> runMany rx
 
 runMany regexes = do
-    let p'lens = [ (p', lens)
+    let p'lens = [ ((p', groupLens), lens)
                  | p <- [ if r == "" then PEmpty else parse r | r <- regexes ]
-                 , let (lens, (_, backRefs)) = runState (possibleLengths p) mempty
+                 , let (lens, (groupLens, backRefs)) = runState (possibleLengths p) mempty
                  , let p' = let ?refs = backRefs in simplify p
                  ]
     let ?pats = map fst p'lens
@@ -340,10 +372,9 @@ runMany regexes = do
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd p'lens)
     tryWith (filter (<= maxLength) lens) 0
 
-run :: String -> IO ()
-run regex = runMany [regex]
+run regex = let ?grp = mempty in runMany [regex]
 
-tryWith :: (?pats :: [Pattern]) => [Int] -> Int -> IO ()
+tryWith :: (?pats :: [(Pattern, GroupLens)]) => [Int] -> Int -> IO ()
 tryWith [] acc = return ()
 tryWith (len:lens) acc = if len > maxLength then return () else do
     AllSatResult allRes <- allSat $ exactMatch len
