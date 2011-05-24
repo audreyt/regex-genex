@@ -18,7 +18,8 @@ import qualified Data.IntMap as IntMap
 import System.Environment
 
 type Len = Int
-type Str = [SWord8]
+type SChar = SWord8
+type Str = [SChar]
 type Offset = SWord8
 type Flips = SWord64
 type Captures = SWord64
@@ -63,6 +64,7 @@ possibleLengths pat = case pat of
     PBound low _ p -> manyTimes p low (low+maxRepeat)
     PPlus p -> manyTimes p 1 (maxRepeat+1)
     PStar _ p -> manyTimes p 0 maxRepeat
+    PEmpty -> zero
     _ -> error $ show pat
     where
     one = return $ IntSet.singleton 1
@@ -89,9 +91,8 @@ exactMatch len = do
             ite (ok s &&& pos s .== toEnum len)
                 (match s{ pos = 0, captureAt = minBound, captureLen = minBound })
                 s{ ok = false, pos = maxBound, flips = maxBound }
-    let finalStatus = foldl runPat initialStatus ?pats
-    return $
-        (flips finalStatus .== 0 &&& pos finalStatus .== toEnum len &&& ok finalStatus)
+    let finalStatus@Status{ ok, pos, flips } = foldl runPat initialStatus ?pats
+    return (flips .== 0 &&& pos .== toEnum len &&& ok)
 
 data Status = Status
     { ok :: SBool
@@ -100,8 +101,6 @@ data Status = Status
     , captureAt :: Captures
     , captureLen :: Captures
     }
-
-type Idx = Word8
 
 instance Mergeable Status where
   symbolicMerge t s1 s2 = Status
@@ -134,7 +133,7 @@ choice flips xs = select (map ($ flips') xs) __FAIL__ thisFlip
 log2 1 = 0
 log2 n = 1 + log2 ((n + 1) `div` 2)
 
-writeCapture :: Captures -> Int -> SWord8 -> Captures
+writeCapture :: Captures -> Int -> Offset -> Captures
 writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
     where
     writeBit c (i, bit) = setBitTo c (idx * 8 + i) bit
@@ -154,7 +153,7 @@ isOne PEscape {getPatternChar = ch}
     | otherwise = True
 isOne _ = False
 
-matchOne :: (?pat :: Pattern) => SWord8 -> SBool
+matchOne :: (?pat :: Pattern) => SChar -> SBool
 matchOne cur = case ?pat of
     PChar {getPatternChar = ch} -> isChar ch
     PDot{} -> isDot
@@ -194,8 +193,9 @@ matchOne cur = case ?pat of
 
 
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
-match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch ||| isOutOfBounds) __FAIL__ $ case ?pat of
-    _ | isOne ?pat -> one
+match s@Status{ ok, pos, flips, captureAt, captureLen }
+  | isOne ?pat = ite (pos .>= strLen) __FAIL__ one
+  | otherwise = ite (pos .> strLen) __FAIL__ $ case ?pat of
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
         { captureAt = writeCapture captureAt idx pos
         , captureLen = writeCapture captureLen idx (pos' - pos)
@@ -210,10 +210,13 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     PConcat [p] -> next p
     PConcat ps
         | all isOne ps -> ite (
-                ((pos + toEnum (length ps)) .<= strLen)
-                    &&&
-                (bAnd [ let ?pat = p in matchOne (charAt (pos+i)) | p <- ps | i <- [0..] ])
-            ) s{ pos = pos + toEnum (length ps) } __FAIL__
+            ((pos + toEnum (length ps)) .<= strLen)
+                &&&
+            (bAnd [ let ?pat = p in matchOne (charAt (pos+i))
+                  | p <- ps
+                  | i <- [0..]
+                  ])
+        ) s{ pos = pos + toEnum (length ps) } __FAIL__
         | (ones@(_:_:_), rest) <- span isOne ps -> step [PConcat ones, PConcat rest] s
         | (nones@(_:_), rest@(_:_:_)) <- span (not . isOne) ps -> step (nones ++ [PConcat rest]) s
         | otherwise -> step ps s
@@ -229,7 +232,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
             let from = readCapture captureAt num
                 len = readCapture captureLen num
                 num = charToDigit ch
-             in ite (matchCapture (from :: SWord8) len 0) s{ pos = pos+len } __FAIL__
+             in ite (matchCapture (from :: Offset) len 0) s{ pos = pos+len } __FAIL__
           | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
           | otherwise  -> cond (ord ch .== cur)
     PBound low (Just high) p -> let s'@Status{ ok = ok' } = (let ?pat = PConcat (replicate low p) in match s) in
@@ -240,6 +243,7 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
             res = let ?pat = PStar True p in match s'
          in ite ok res s'
     PStar _ p -> next $ PBound 0 Nothing p
+    PEmpty -> s
     _ -> error $ show ?pat
     where
     one = cond $ matchOne cur
@@ -263,7 +267,6 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
     oneOf cs = cond $ bOr [ ord ch .== cur | ch <- cs ]
     noneOf cs = cond $ bAnd ((cur .>= ord ' ') : (cur .<= ord '~') : [ ord ch ./= cur | ch <- cs ])
     ord = toEnum . Data.Char.ord
-    matchCapture :: SWord8 -> SWord8 -> SWord8 -> SBool
     matchCapture from len off = (len .<= off) |||
         (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (off+1))
     __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
@@ -294,7 +297,7 @@ main = do
 runMany regexes = do
     let ?pats = map parse regexes
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map lenOf ?pats)
-    tryWith lens 0
+    tryWith (filter (<= maxLength) lens) 0
     where
     lenOf p = fst $ runState (possibleLengths p) mempty
 
@@ -321,12 +324,4 @@ disp' (str, choices) = do
     putStr "\t\t"
     print $ map chr str
     where
-    chr :: Word8 -> Char
-    chr = Data.Char.chr . fromEnum
-
-disp :: [Word8] -> IO ()
-disp str = do
-    putStrLn $ map chr str
-    where
-    chr :: Word8 -> Char
     chr = Data.Char.chr . fromEnum
