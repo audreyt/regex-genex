@@ -30,6 +30,7 @@ maxLength = 255
 maxRepeat = 3 -- 7 and 15 are also good
 
 lengths p = IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
+minLen p = IntSet.findMin . fst $ runState (possibleLengths p) mempty
 
 defaultRegex = "a(b|c)d{2,3}e*"
 parse r = case parseRegex r of
@@ -50,10 +51,8 @@ possibleLengths pat = case pat of
     PDollar{} -> zero
     PQuest p -> fmap (`mappend` IntSet.singleton 0) $ possibleLengths p
     POr ps -> fmap mconcat $ mapM possibleLengths ps
-    PConcat [] -> return mempty
+    PConcat [] -> zero
     PConcat ps -> fmap (foldl1 sumSets) (mapM possibleLengths ps)
-        where
-        sumSets s1 s2 = IntSet.unions [ IntSet.map (+elm) s2 | elm <- IntSet.elems s1 ]
     PEscape {getPatternChar = ch}
         | ch `elem` "ntrfaedwsWSD" -> one
         | ch `elem` "b" -> zero
@@ -69,9 +68,10 @@ possibleLengths pat = case pat of
     where
     one = return $ IntSet.singleton 1
     zero = return $ IntSet.singleton 0
+    sumSets s1 s2 = IntSet.unions [ IntSet.map (+elm) s2 | elm <- IntSet.elems s1 ]
     manyTimes p low high = do
         lenP <- possibleLengths p
-        return $ IntSet.unions [ IntSet.map (*i) lenP | i <- [low..high] ]
+        return $ IntSet.unions [ foldl sumSets (IntSet.singleton 0) (replicate i lenP) | i <- [low..high] ]
 
 charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 
@@ -195,7 +195,7 @@ matchOne cur = case ?pat of
 match :: (?str :: Str, ?pat :: Pattern) => Status -> Status
 match s@Status{ ok, pos, flips, captureAt, captureLen }
   | isOne ?pat = ite (pos .>= strLen) __FAIL__ one
-  | otherwise = ite (pos .> strLen) __FAIL__ $ case ?pat of
+  | otherwise = ite (pos + (toEnum $ minLen ?pat) .> strLen) __FAIL__ $ case ?pat of
     PGroup (Just idx) p -> let s'@Status{ pos = pos' } = next p in s'
         { captureAt = writeCapture captureAt idx pos
         , captureLen = writeCapture captureLen idx (pos' - pos)
@@ -312,11 +312,11 @@ tryWith (len:lens) acc = if len > maxLength then return () else do
     where
     showResult [] a = tryWith lens a
     showResult (r:rs) a = do
-        disp' $ getModel r
+        disp $ getModel r
         if (a+1 >= maxHits) then return () else showResult rs (a+1)
 
-disp' :: ([Word8], Word64) -> IO ()
-disp' (str, choices) = do
+disp :: ([Word8], Word64) -> IO ()
+disp (str, choices) = do
     putStr $ show (length str) ++ "."
     let n = show choices
     putStr (replicate (8 - length n) '0')
