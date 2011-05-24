@@ -52,7 +52,13 @@ simplify pat = case pat of
     POr ps -> POr (map simplify ps)
     PConcat [] -> PEmpty
     PConcat [p] -> simplify p
-    PConcat ps -> PConcat (map simplify ps)
+    PConcat ps -> case concatMap (fromConcat . simplify) ps of
+        [] -> PEmpty
+        ps' -> PConcat ps'
+        where
+        fromConcat (PConcat ps) = ps
+        fromConcat PEmpty       = []
+        fromConcat p            = [p]
     PBound low (Just high) p
         | high == low -> simplify $ PConcat (replicate low (simplify p))
     PBound low high p -> PBound low high (simplify p)
@@ -319,14 +325,14 @@ main = do
         rx -> runMany rx
 
 runMany regexes = do
-    let whee = [ (p', lens)
-               | p <- [ if r == "" then PEmpty else parse r | r <- regexes ]
-               , let (lens, (_, backRefs)) = runState (possibleLengths p) mempty
-               , let p' = let ?refs = backRefs in simplify p
-               ]
-    let ?pats = map fst whee
+    let p'lens = [ (p', lens)
+                 | p <- [ if r == "" then PEmpty else parse r | r <- regexes ]
+                 , let (lens, (_, backRefs)) = runState (possibleLengths p) mempty
+                 , let p' = let ?refs = backRefs in simplify p
+                 ]
+    let ?pats = map fst p'lens
     -- print ?pats
-    let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd whee)
+    let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd p'lens)
     tryWith (filter (<= maxLength) lens) 0
 
 run :: String -> IO ()
