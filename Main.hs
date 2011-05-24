@@ -47,6 +47,11 @@ simplify pat = case pat of
     PQuest p -> case simplify p of
         PEmpty -> PEmpty
         p'     -> PQuest p'
+    PAny {getPatternSet = pset, getDoPa} -> case pset of
+        PatternSet (Just cset) _ _ _ -> case toList cset of
+            [ch] -> PChar { getPatternChar = ch, getDoPa }
+            _    -> pat
+        _ -> pat
     POr [] -> PEmpty
     POr [p] -> simplify p
     POr ps -> POr (map simplify ps)
