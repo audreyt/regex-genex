@@ -5,3 +5,5 @@ test ::
 
 install ::
 	cabal install
+	cp ~/.cabal/bin/genex binaries/osx/
+	strip binaries/osx/genex
