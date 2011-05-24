@@ -215,12 +215,12 @@ match s@Status{ ok, pos, flips, captureAt, captureLen } = ite (isFailedMatch |||
                 (bAnd [ let ?pat = p in matchOne (charAt (pos+i)) | p <- ps | i <- [0..] ])
             ) s{ pos = pos + toEnum (length ps) } __FAIL__
         | (ones@(_:_:_), rest) <- span isOne ps -> step [PConcat ones, PConcat rest] s
-        | (nones, rest@(_:_:_)) <- span (not . isOne) ps -> step (nones ++ [PConcat rest]) s
+        | (nones@(_:_), rest@(_:_:_)) <- span (not . isOne) ps -> step (nones ++ [PConcat rest]) s
         | otherwise -> step ps s
         where
         step [] s' = s'
         step (p:ps) s' = 
-            let s''@Status{ ok } = let ?pat = p in match s'
+            let s''@Status{ ok } = (let ?pat = p in match s')
                 res = step ps s''
              in ite ok res __FAIL__
     PEscape {getPatternChar = ch} -> case ch of
