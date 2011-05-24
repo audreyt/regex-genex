@@ -1,6 +1,6 @@
 Available on Hackage as: http://hackage.haskell.org/package/regex-genex
 
-The "genex" program finds permutations of strings that matches every
+The "genex" program finds all permutations of strings that matches every
 regular expressions specified in the command line, with full support
 for back references (\1 .. \8) and word boundaries (\b).
 
