@@ -272,8 +272,6 @@ match s@Status{ pos, flips, captureAt, captureLen }
     PConcat [p] -> next p
     PConcat ps
         | all isOne ps -> ite (
-            ((pos + toEnum (length ps)) .<= strLen)
-                &&&
             (bAnd [ let ?pat = p in matchOne (charAt (pos+i))
                   | p <- ps
                   | i <- [0..]
