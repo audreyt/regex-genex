@@ -13,6 +13,7 @@ import qualified Data.IntSet as IntSet
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import System.IO.Unsafe (unsafeInterleaveIO)
+import Regex.Genex.Normalize (normalize)
 
 -- | Given a list of regular repressions, returns all possible strings that matches all of them.
 genex :: [String] -> IO [String]
@@ -66,37 +67,6 @@ parse r = case parseRegex r of
 
 type GroupLens = IntMap IntSet
 type BackReferences = IntSet
-
-simplify :: (?refs :: BackReferences) => Pattern -> Pattern
-simplify pat = case pat of
-    PGroup (Just idx) p -> if idx `IntSet.member` ?refs then PGroup (Just idx) (simplify p) else simplify p
-    PGroup _ p -> simplify p
-    PQuest p -> case simplify p of
-        PEmpty -> PEmpty
-        p'     -> PQuest p'
-    PAny {getPatternSet = pset, getDoPa} -> case pset of
-        PatternSet (Just cset) _ _ _ -> case toList cset of
-            [ch] -> PChar { getPatternChar = ch, getDoPa }
-            _    -> pat
-        _ -> pat
-    POr [] -> PEmpty
-    POr [p] -> simplify p
-    POr ps -> POr (map simplify ps)
-    PConcat [] -> PEmpty
-    PConcat [p] -> simplify p
-    PConcat ps -> case concatMap (fromConcat . simplify) ps of
-        [] -> PEmpty
-        ps' -> PConcat ps'
-        where
-        fromConcat (PConcat ps') = ps'
-        fromConcat PEmpty        = []
-        fromConcat p             = [p]
-    PBound low (Just high) p
-        | high == low -> simplify $ PConcat (replicate low (simplify p))
-    PBound low high p -> PBound low high (simplify p)
-    PPlus p -> PPlus (simplify p)
-    PStar x p -> PStar x (simplify p)
-    _ -> pat
 
 possibleLengths :: (?grp :: GroupLens) => Pattern -> State (GroupLens, BackReferences) IntSet
 possibleLengths pat = case pat of
@@ -308,7 +278,7 @@ match s@Status{ pos, flips, captureAt, captureLen }
           | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
           | otherwise  -> cond (ord ch .== cur)
     PBound low (Just high) p -> let s'@Status{ ok = ok' } = (let ?pat = PConcat (replicate low p) in match s) in
-        ite ok' (let ?pat = p in (manyTimes s' $ high - low)) s'
+        if low == high then s' else ite ok' (let ?pat = p in (manyTimes s' $ high - low)) s'
     PBound low _ p -> let ?pat = (PBound low (Just $ low+maxRepeat) p) in match s
     PPlus p ->
         let s'@Status{ok} = next p
@@ -376,7 +346,7 @@ genexWith f regexes = do
     let p'lens = [ ((p', groupLens), lens)
                  | p <- [ if r == "" then PEmpty else parse r | r <- regexes ]
                  , let (lens, (groupLens, backRefs)) = runState (possibleLengths p) mempty
-                 , let p' = let ?refs = backRefs in simplify p
+                 , let p' = normalize backRefs p
                  ]
     let ?pats = map fst p'lens
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd p'lens)

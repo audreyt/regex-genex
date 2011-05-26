@@ -13,21 +13,21 @@ The output is unsorted, but the order is deterministic across multiple runs:
 
 To enforce a fixed ordering for alternations, pipe the output to "sort -n":
 
-    $ genex '(-|O){1,3}' | sort -n
-    1.00000000              "-"
-    1.00000001              "O"
-    2.00000002              "--"
-    2.00000003              "O-"
-    2.00000006              "-O"
-    2.00000007              "OO"
-    3.00000010              "---"
-    3.00000011              "O--"
-    3.00000014              "-O-"
-    3.00000015              "OO-"
-    3.00000026              "--O"
-    3.00000027              "O-O"
-    3.00000030              "-OO"
-    3.00000031              "OOO"
+    $ genex '(__|<>){1,3}' | sort -n
+    2.00000000              "<>"
+    2.00000001              "__"
+    4.00000002              "<><>"
+    4.00000003              "__<>"
+    4.00000006              "<>__"
+    4.00000007              "____"
+    6.00000010              "<><><>"
+    6.00000011              "__<><>"
+    6.00000014              "<>__<>"
+    6.00000015              "____<>"
+    6.00000026              "<><>__"
+    6.00000027              "__<>__"
+    6.00000030              "<>____"
+    6.00000031              "______"
 
 Output size and maximum string length are both capped at 65535 currently,
 but both can be raised if needed.
