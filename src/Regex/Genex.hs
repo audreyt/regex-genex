@@ -144,19 +144,19 @@ exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars len
     initialFlips <- free "flips"
-    at' <- newArray_ (Just minBound)
-    len' <- newArray_ (Just minBound)
+    captureAt <- newArray_ (Just minBound)
+    captureLen <- newArray_ (Just minBound)
     let ?str = str
     let initialStatus = Status
             { ok = true
             , pos = toEnum len
             , flips = initialFlips
-            , captureAt = at'
-            , captureLen = writeCapture len' 1 1
+            , captureAt = captureAt
+            , captureLen = captureLen
             }
         runPat s (pat, groupLens) = let ?pat = pat in let ?grp = groupLens in
             ite (ok s &&& pos s .== toEnum len)
-                (match s{ pos = 0, captureAt = at', captureLen = len' })
+                (match s{ pos = 0, captureAt, captureLen })
                 s{ ok = false, pos = maxBound, flips = maxBound }
     let Status{ ok, pos, flips } = foldl runPat initialStatus ?pats
     return (flips .== 0 &&& pos .== toEnum len &&& ok)
@@ -184,11 +184,6 @@ choice flips [a] = a flips
 choice flips [a, b] = ite (lsb flips) (b flips') (a flips')
     where
     flips' = flips `shiftR` 1
-    {-
-choice flips (x:xs) = ite (lsb flips) (choice flips' xs) (x flips')
-    where
-    flips' = flips `shiftR` 1
-    -}
 choice flips xs = select (map ($ flips') xs) (head xs thisFlip){ ok = false } thisFlip
     where
     bits = log2 $ length xs
@@ -201,16 +196,9 @@ log2 n = 1 + log2 ((n + 1) `div` 2)
 
 writeCapture :: Captures -> Int -> Offset -> Captures
 writeCapture cap idx val = writeArray cap (toEnum idx) val
--- writeCapture cap idx val = (take (idx-1) (cap ++ [0..])) ++ (val : drop idx cap)
-{-
-writeCapture cap idx val = foldl writeBit cap ([0..7] `zip` blastLE val)
-    where
-    writeBit c (i, bit) = setBitTo c (idx * 8 + i) bit
--}
 
 readCapture :: Captures -> Int -> SChar
 readCapture a = readArray a . toEnum
---readCapture cap idx = fromBitsLE [ bitValue cap (idx * 8 + i) | i <- [ 0..7 ] ]
     
 isOne :: Pattern -> Bool
 isOne PChar{} = True
