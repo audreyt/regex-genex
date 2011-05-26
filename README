@@ -29,8 +29,8 @@ To enforce a fixed ordering for alternations, pipe the output to "sort -n":
     3.00000030              "-OO"
     3.00000031              "OOO"
 
-Output is currently capped at 65535 lines, with maximum string length
-capped at 255, but both can be raised if needed.
+Output size and maximum string length are both capped at 65535 currently,
+but both can be raised if needed.
 
 Because genex generates matches lazily, we can use "head -n" to display
 only part of its output:

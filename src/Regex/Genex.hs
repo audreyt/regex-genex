@@ -1,6 +1,7 @@
 {-# LANGUAGE ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards #-}
 module Regex.Genex (Model(..), genex, genexPrint, genexModels) where
 import Data.SBV
+import Data.SBV.Internals (SBV)
 import Data.Set (toList)
 import Data.Monoid
 import Control.Monad.State
@@ -32,17 +33,22 @@ genexModels = genexWith (getStringWith id)
 genexPrint :: [String] -> IO ()
 genexPrint = genexWith displayString
 
-type Len = Int
+type Len = Word16
 type SChar = SWord8
 type Str = [SChar]
-type Offset = SWord8
+type Offset = SBV Len
 type Flips = SWord64
-type Captures = SFunArray Word8 Word8
+type Captures = SFunArray Word8 Len
+type Hits = Word16
 
-maxHits, maxLength, maxRepeat :: Int
-maxHits = 65535
-maxLength = 255
+maxHits :: Hits
+maxHits = maxBound -- 65535
+
+maxRepeat :: Int
 maxRepeat = 3 -- 7 and 15 are also good
+
+maxLength :: Len
+maxLength = maxBound -- 65535
 
 -- lengths p = let ?grp = mempty in IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
 
@@ -142,24 +148,25 @@ charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 
 exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
-    str <- mkFreeVars len
+    str <- mkFreeVars $ fromEnum len
     initialFlips <- free "flips"
     captureAt <- newArray_ (Just minBound)
     captureLen <- newArray_ (Just minBound)
     let ?str = str
     let initialStatus = Status
             { ok = true
-            , pos = toEnum len
+            , pos = strLen
             , flips = initialFlips
             , captureAt = captureAt
             , captureLen = captureLen
             }
+        strLen = literal len
         runPat s (pat, groupLens) = let ?pat = pat in let ?grp = groupLens in
-            ite (ok s &&& pos s .== toEnum len)
+            ite (ok s &&& pos s .== strLen)
                 (match s{ pos = 0, captureAt, captureLen })
                 s{ ok = false, pos = maxBound, flips = maxBound }
     let Status{ ok, pos, flips } = foldl runPat initialStatus ?pats
-    return (flips .== 0 &&& pos .== toEnum len &&& ok)
+    return (flips .== 0 &&& pos .== strLen &&& ok)
 
 data Status = Status
     { ok :: SBool
@@ -197,7 +204,7 @@ log2 n = 1 + log2 ((n + 1) `div` 2)
 writeCapture :: Captures -> Int -> Offset -> Captures
 writeCapture cap idx val = writeArray cap (toEnum idx) val
 
-readCapture :: Captures -> Int -> SChar
+readCapture :: Captures -> Int -> Offset
 readCapture a = readArray a . toEnum
     
 isOne :: Pattern -> Bool
@@ -348,7 +355,7 @@ match s@Status{ pos, flips, captureAt, captureLen }
              (isWordCharAt (pos-1) <+> isWordCharAt pos)
 
 
-displayString :: [SMTResult] -> Int -> (Int -> IO ()) -> IO ()
+displayString :: [SMTResult] -> Hits -> (Hits -> IO ()) -> IO ()
 displayString [] a next = next a
 displayString (r:rs) a next = do
     let (chars, rank) = getModel r
@@ -363,7 +370,7 @@ displayString (r:rs) a next = do
     where
     chr = Data.Char.chr . fromEnum
 
-genexWith :: Monoid a => ([SMTResult] -> Int -> (Int -> IO a) -> IO a) -> [[Char]] -> IO a
+genexWith :: Monoid a => ([SMTResult] -> Hits -> (Hits -> IO a) -> IO a) -> [[Char]] -> IO a
 genexWith f regexes = do
     let ?grp = mempty
     let p'lens = [ ((p', groupLens), lens)
@@ -373,18 +380,18 @@ genexWith f regexes = do
                  ]
     let ?pats = map fst p'lens
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd p'lens)
-    tryWith f (filter (<= maxLength) lens) 0
+    tryWith f (filter (<= maxLength) $ map toEnum lens) 0
 
 tryWith :: (?pats :: [(Pattern, GroupLens)]) => 
-    Monoid a => ResultHandler a -> [Int] -> Int -> IO a
+    Monoid a => ResultHandler a -> [Len] -> Hits -> IO a
 tryWith _ [] _ = return mempty
 tryWith f (len:lens) acc = if len > maxLength then return mempty else do
     AllSatResult allRes <- allSat $ exactMatch len
     f allRes acc $ tryWith f lens
 
-type ResultHandler a = [SMTResult] -> Int -> (Int -> IO a) -> IO a
+type ResultHandler a = [SMTResult] -> Hits -> (Hits -> IO a) -> IO a
 
-getStringWith :: (Model -> a) -> [SMTResult] -> Int -> (Int -> IO [a]) -> IO [a]
+getStringWith :: (Model -> a) -> [SMTResult] -> Hits -> (Hits -> IO [a]) -> IO [a]
 getStringWith _ [] a next = next a
 getStringWith f (r:rs) a next = do
     let (chars, rank) = getModel r
@@ -392,7 +399,7 @@ getStringWith f (r:rs) a next = do
         unsafeInterleaveIO $ getStringWith f rs (a+1) next
     return (f (Model chars rank):rest)
 
-getString :: [SMTResult] -> Int -> (Int -> IO [String]) -> IO [String]
+getString :: [SMTResult] -> Hits -> (Hits -> IO [String]) -> IO [String]
 getString = getStringWith $ \Model{ modelChars } -> map chr modelChars
     where
     chr = Data.Char.chr . fromEnum

@@ -12,3 +12,6 @@ install ::
 	cabal install
 	cp ~/.cabal/bin/genex binaries/osx/
 	strip binaries/osx/genex
+
+ghci ::
+	ghci -isrc Main.hs
