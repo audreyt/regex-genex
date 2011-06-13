@@ -29,7 +29,7 @@ omega p = case p of
     PStar _ p -> omega $ PBound 0 Nothing p
     PBound low high p -> do
         p <- omega p
-        n <- each [low..maybe (low+3) id high]
+        n <- each [low..maybe (low+maxRepeat) id high]
         return $ T.replicate n p
     PConcat ps -> fmap T.concat . sequence $ map omega ps
     POr xs -> foldl1 mplus $ map omega xs
