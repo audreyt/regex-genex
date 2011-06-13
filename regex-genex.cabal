@@ -27,7 +27,7 @@ executable genex
     hs-source-dirs:     . src
     extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa, control-monad-omega, text
+        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa
 
 source-repository head
   type:     git
