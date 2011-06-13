@@ -1,5 +1,5 @@
 Name            : regex-genex
-Version         : 0.2.1
+Version         : 0.3.0
 license         : OtherLicense
 license-file    : LICENSE
 cabal-version   : >= 1.6
@@ -17,16 +17,17 @@ Tested-With:    GHC==7.0.2
 library
     hs-source-dirs:     . src
     exposed-modules:    Regex.Genex Regex.Genex.Normalize
-    extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards
+    other-modules:    Regex.Genex.Pure
+    extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa
+        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa, control-monad-omega, text
 
 executable genex
     main-is:            Main.hs
     hs-source-dirs:     . src
-    extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards
+    extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa
+        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa, control-monad-omega, text
 
 source-repository head
   type:     git

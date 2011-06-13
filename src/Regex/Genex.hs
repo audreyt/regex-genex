@@ -1,12 +1,14 @@
 {-# LANGUAGE ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards #-}
-module Regex.Genex (Model(..), genex, genexPrint, genexModels) where
+module Regex.Genex (Model(..), genex, genexPure, genexPrint, genexModels) where
 import Data.SBV
 import Data.SBV.Internals (SBV)
 import Data.Set (toList)
 import Data.Monoid
 import Control.Monad.State
 import qualified Data.Char
+import qualified Regex.Genex.Pure as Pure
 import Text.Regex.TDFA.Pattern
+import Regex.Genex.Normalize (normalize)
 import Text.Regex.TDFA.ReadRegex (parseRegex)
 import Data.IntSet (IntSet)
 import qualified Data.IntSet as IntSet
@@ -15,7 +17,8 @@ import qualified Data.IntMap as IntMap
 import System.IO.Unsafe (unsafeInterleaveIO)
 import Regex.Genex.Normalize (normalize)
 
--- | Given a list of regular repressions, returns all possible strings that matches all of them.
+-- | Given a list of regular repressions, returns all possible strings that matches every one of them.
+-- Guarantees to return shorter strings before longer ones.
 genex :: [String] -> IO [String]
 genex = genexWith getString
 
@@ -34,11 +37,17 @@ genexModels = genexWith (getStringWith id)
 genexPrint :: [String] -> IO ()
 genexPrint = genexWith displayString
 
+-- | A pure and much faster variant of @genex@, but without support for back-references, anchors or word boundaries.
+-- Does not guarantee orders about length of strings.
+-- Does not depend on the external 'yices' SMT solver.
+genexPure :: [String] -> [String]
+genexPure = Pure.genexPure
+
 type Len = Word16
 type SChar = SWord8
 type Str = [SChar]
 type Offset = SBV Len
-type Flips = SWord64
+type Flips = [SWord64]
 type Captures = SFunArray Word8 Len
 type Hits = Word16
 
@@ -119,7 +128,7 @@ charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkFreeVars $ fromEnum len
-    initialFlips <- free "flips"
+    initialFlips <- mkFreeVars 1
     captureAt <- newArray_ (Just minBound)
     captureLen <- newArray_ (Just minBound)
     let ?str = str
@@ -134,9 +143,9 @@ exactMatch len = do
         runPat s (pat, groupLens) = let ?pat = pat in let ?grp = groupLens in
             ite (ok s &&& pos s .== strLen)
                 (match s{ pos = 0, captureAt, captureLen })
-                s{ ok = false, pos = maxBound, flips = maxBound }
+                s{ ok = false, pos = maxBound, flips = [maxBound] }
     let Status{ ok, pos, flips } = foldl runPat initialStatus ?pats
-    return (flips .== 0 &&& pos .== strLen &&& ok)
+    return (bAll (.== 0) flips &&& pos .== strLen &&& ok)
 
 data Status = Status
     { ok :: SBool
@@ -158,14 +167,15 @@ instance Mergeable Status where
 choice :: (?str :: Str, ?pat :: Pattern) => Flips -> [Flips -> Status] -> Status
 choice _ [] = error "X"
 choice flips [a] = a flips
-choice flips [a, b] = ite (lsb flips) (b flips') (a flips')
+choice flips [a, b] = ite (lsb flip) (b flips') (a flips')
     where
-    flips' = flips `shiftR` 1
-choice flips xs = select (map ($ flips') xs) (head xs thisFlip){ ok = false } thisFlip
+    flip = head flips
+    flips' = [flip `shiftR` 1]
+choice flips xs = select (map ($ flips') xs) (head xs [thisFlip]){ ok = false } thisFlip
     where
     bits = log2 $ length xs
-    flips' = flips `shiftR` bits
-    thisFlip = (flips `shiftL` (64 - bits)) `shiftR` (64 - bits)
+    flips' = [head flips `shiftR` bits]
+    thisFlip = head flips `shiftL` (64 - bits) `shiftR` (64 - bits)
 
 log2 :: Int -> Int
 log2 1 = 0
@@ -309,7 +319,7 @@ match s@Status{ pos, flips, captureAt, captureLen }
         | otherwise = (len .<= off) ||| (charAt (pos+off) .== charAt (from+off) &&& matchCapture from len (n+1))
         where
         off = toEnum n
-    __FAIL__ = s{ ok = false, pos = maxBound, flips = maxBound }
+    __FAIL__ = s{ ok = false, pos = maxBound, flips = [maxBound] }
     isEnd = (pos .== toEnum (length ?str))
     isBegin = (pos .== 0)
     isWordCharAt at = let char = charAt at in
