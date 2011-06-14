@@ -52,11 +52,11 @@ Some caveats:
 
 - No named Unicode properties or POSIX [[:upper:]] classes yet.
 
-Required Hackage libraries: sbv regex-tdfa
+Required Hackage libraries: sbv regex-tdfa control-monad-omega text
 
 Required binary in PATH:
 
-    yices2 # Download it from http://yices.csl.sri.com/download-yices2.shtml
+    yices # Download it from http://yices.csl.sri.com/download-yices2.shtml
 
 You can directly run the Main.hs in the checkout directory as well:
 

@@ -9,8 +9,8 @@ import qualified Data.Set as Set
 
 type BackReferences = IntSet
 
--- | Normalize a regex into "strong star normal form", as defined in the paper
---   "Simplifying Regular Expressions: A Quantitative Perspective".
+-- | Normalize a regex into @strong star normal form@, as defined in the paper
+--   @Simplifying Regular Expressions: A Quantitative Perspective@.
 normalize :: BackReferences -> Pattern -> Pattern
 normalize refs p = black $ let ?refs = refs in simplify p
 
