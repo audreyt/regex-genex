@@ -26,7 +26,6 @@ import qualified Data.IntSet as IntSet
 import Data.IntMap (IntMap)
 import qualified Data.IntMap as IntMap
 import System.IO.Unsafe (unsafeInterleaveIO)
-import Regex.Genex.Normalize (normalize)
 
 -- | Given a list of regular repressions, returns all possible strings that matches every one of them.
 -- Guarantees to return shorter strings before longer ones.

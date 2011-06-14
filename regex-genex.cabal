@@ -1,5 +1,5 @@
 Name            : regex-genex
-Version         : 0.3.0
+Version         : 0.3.1
 license         : OtherLicense
 license-file    : LICENSE
 cabal-version   : >= 1.6
@@ -20,7 +20,7 @@ library
     other-modules:    Regex.Genex.Pure
     extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa, control-monad-omega, text
+        base >= 3 && < 5, haskell98, mtl, containers, sbv, regex-tdfa, stream-monad, text, logict
 
 executable genex
     main-is:            Main.hs

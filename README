@@ -52,7 +52,7 @@ Some caveats:
 
 - No named Unicode properties or POSIX [[:upper:]] classes yet.
 
-Required Hackage libraries: sbv regex-tdfa control-monad-omega text
+Required Hackage libraries: sbv regex-tdfa stream-monad text
 
 Required binary in PATH:
 
