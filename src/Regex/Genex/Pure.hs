@@ -29,6 +29,7 @@ each = foldl1 (<|>) . map return
 
 run :: Pattern -> Stream T.Text
 run p = case p of
+    PEmpty -> pure T.empty
     PChar{..} -> isChar getPatternChar
     PAny {getPatternSet = PatternSet (Just cset) _ _ _} -> each $ map T.singleton $ Set.toList cset
     PQuest p -> pure T.empty <|> run p
