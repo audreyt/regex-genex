@@ -138,8 +138,8 @@ charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 
 exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
-    str <- mkFreeVars $ fromEnum len
-    initialFlips <- mkFreeVars 1
+    str <- mkExistVars $ fromEnum len
+    initialFlips <- mkExistVars 1
     captureAt <- newArray_ (Just minBound)
     captureLen <- newArray_ (Just minBound)
     let ?str = str
@@ -346,10 +346,10 @@ match s@Status{ pos, flips, captureAt, captureLen }
              (isWordCharAt (pos-1) <+> isWordCharAt pos)
 
 
-displayString :: [SMTResult] -> Hits -> (Hits -> IO ()) -> IO ()
+displayString :: [SatResult] -> Hits -> (Hits -> IO ()) -> IO ()
 displayString [] a next = next a
 displayString (r:rs) a next = do
-    let (chars, rank) = getModel r
+    let Right (chars, rank) = getModel r
     putStr $ show (length (chars :: [Word8])) ++ "."
     let n = show (rank :: Word64)
     putStr (replicate (8 - length n) '0')
@@ -361,7 +361,7 @@ displayString (r:rs) a next = do
     where
     chr = Data.Char.chr . fromEnum
 
-genexWith :: Monoid a => ([SMTResult] -> Hits -> (Hits -> IO a) -> IO a) -> [[Char]] -> IO a
+genexWith :: Monoid a => ([SatResult] -> Hits -> (Hits -> IO a) -> IO a) -> [[Char]] -> IO a
 genexWith f regexes = do
     let ?grp = mempty
     let p'lens = [ ((p', groupLens), lens)
@@ -377,20 +377,20 @@ tryWith :: (?pats :: [(Pattern, GroupLens)]) =>
     Monoid a => ResultHandler a -> [Len] -> Hits -> IO a
 tryWith _ [] _ = return mempty
 tryWith f (len:lens) acc = if len > maxLength then return mempty else do
-    AllSatResult allRes <- allSat $ exactMatch len
-    f allRes acc $ tryWith f lens
+    AllSatResult (_, allRes) <- allSat $ exactMatch len
+    f (map SatResult allRes) acc $ tryWith f lens
 
-type ResultHandler a = [SMTResult] -> Hits -> (Hits -> IO a) -> IO a
+type ResultHandler a = [SatResult] -> Hits -> (Hits -> IO a) -> IO a
 
-getStringWith :: (Model -> a) -> [SMTResult] -> Hits -> (Hits -> IO [a]) -> IO [a]
+getStringWith :: (Model -> a) -> [SatResult] -> Hits -> (Hits -> IO [a]) -> IO [a]
 getStringWith _ [] a next = next a
 getStringWith f (r:rs) a next = do
-    let (chars, rank) = getModel r
+    let Right (chars, rank) = getModel r
     rest <- if (a+1 >= maxHits) then return [] else
         unsafeInterleaveIO $ getStringWith f rs (a+1) next
     return (f (Model chars rank):rest)
 
-getString :: [SMTResult] -> Hits -> (Hits -> IO [String]) -> IO [String]
+getString :: [SatResult] -> Hits -> (Hits -> IO [String]) -> IO [String]
 getString = getStringWith $ \Model{ modelChars } -> map chr modelChars
     where
     chr = Data.Char.chr . fromEnum
