@@ -23,7 +23,7 @@ genexPure :: [String] -> [String]
 genexPure = map T.unpack . foldl1 intersect . map (toList . run . normalize IntSet.empty . parse)
 
 maxRepeat :: Int
-maxRepeat = 3
+maxRepeat = 10
 
 each = foldl1 (<|>) . map return
 
@@ -32,6 +32,7 @@ run p = case p of
     PEmpty -> pure T.empty
     PChar{..} -> isChar getPatternChar
     PAny {getPatternSet = PatternSet (Just cset) _ _ _} -> each $ map T.singleton $ Set.toList cset
+    PAnyNot {getPatternSet = PatternSet (Just cset) _ _ _} -> chars $ notChars $ concatMap expandEscape $ Set.toList cset
     PQuest p -> pure T.empty <|> run p
     PPlus p -> run $ PBound 1 Nothing p
     PStar _ p -> run $ PBound 0 Nothing p
@@ -40,23 +41,24 @@ run p = case p of
         fmap T.concat . sequence $ replicate n (run p) 
     PConcat ps -> fmap T.concat . suspended . sequence $ map run ps
     POr xs -> foldl1 mplus $ map run xs
-    PDot{} -> notChars []
-    PEscape {..} -> case getPatternChar of
-        'n' -> isChar '\n'
-        't' -> isChar '\t'
-        'r' -> isChar '\r'
-        'f' -> isChar '\f'
-        'a' -> isChar '\a'
-        'e' -> isChar '\ESC'
-        'd' -> chars $ ['0'..'9']
-        'w' -> chars $ ['0'..'9'] ++ '_' : ['a'..'z'] ++ ['A'..'Z']
-        's' -> chars "\9\10\12\13\32"
-        'W' -> notChars $ ['0'..'9']
-        'S' -> notChars $ ['0'..'9'] ++ '_' : ['a'..'z'] ++ ['A'..'Z']
-        'D' -> notChars "\9\10\12\13\32"
-        ch  -> isChar ch
+    PDot{} -> chars $ notChars []
+    PEscape {..} -> chars $ expandEscape getPatternChar
     _      -> error $ show p
     where
     isChar = return . T.singleton
     chars = each . map T.singleton
-    notChars = chars . ([' '..'~'] \\)
+    notChars = ([' '..'~'] \\)
+    expandEscape ch = case ch of
+        'n' -> "\n"
+        't' -> "\t"
+        'r' -> "\r"
+        'f' -> "\f"
+        'a' -> "\a"
+        'e' -> "\ESC"
+        'd' -> ['0'..'9']
+        'w' -> ['0'..'9'] ++ '_' : ['a'..'z'] ++ ['A'..'Z']
+        's' -> "\9\32"
+        'D' -> notChars $ ['0'..'9']
+        'W' -> notChars $ ['0'..'9'] ++ '_' : ['a'..'z'] ++ ['A'..'Z']
+        'S' -> notChars "\9\32"
+        ch  -> [ch]
