@@ -4,6 +4,7 @@ import Control.Monad.Logic.Class (MonadLogic(..))
 import qualified Data.Text as T
 import qualified Data.IntSet as IntSet
 import qualified Data.Set as Set
+import qualified Control.Monad.Stream as Stream
 import Data.List (intersect, (\\))
 import Control.Monad
 import Control.Monad.Stream
@@ -20,7 +21,7 @@ parse r = case parseRegex r of
     Left x -> error $ show x
 
 genexPure :: [String] -> [String]
-genexPure = map T.unpack . foldl1 intersect . map (toList . run . normalize IntSet.empty . parse)
+genexPure = map T.unpack . foldl1 intersect . map (Stream.toList . run . normalize IntSet.empty . parse)
 
 maxRepeat :: Int
 maxRepeat = 10
