@@ -3,7 +3,7 @@ Version         : 0.5.0
 license         : OtherLicense
 license-file    : LICENSE
 cabal-version   : >= 1.6
-copyright       : 2011 Audrey Tang
+copyright       : 2011-2012 Audrey Tang
 maintainer      : Audrey Tang <audreyt@audreyt.org>
 category        : Text, Regex
 stability       : experimental
