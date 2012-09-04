@@ -1,5 +1,5 @@
 Name            : regex-genex
-Version         : 0.4.0
+Version         : 0.5.0
 license         : OtherLicense
 license-file    : LICENSE
 cabal-version   : >= 1.6
