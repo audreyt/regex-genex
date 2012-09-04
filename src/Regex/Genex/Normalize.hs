@@ -1,4 +1,4 @@
-{-# LANGUAGE ImplicitParams, NamedFieldPuns #-}
+{-# LANGUAGE ImplicitParams, NamedFieldPuns, PatternGuards #-}
 module Regex.Genex.Normalize (normalize) where
 import Data.Set (toList, Set)
 import Text.Regex.TDFA.Pattern
@@ -14,6 +14,7 @@ type BackReferences = IntSet
 normalize :: BackReferences -> Pattern -> Pattern
 normalize refs p = black $ let ?refs = refs in simplify p
 
+nullable :: Pattern -> Bool
 nullable pat = case pat of
     PGroup _ p -> nullable p
     PQuest{} -> True
@@ -25,6 +26,7 @@ nullable pat = case pat of
     PEmpty -> True
     _ -> False
 
+white :: Pattern -> Pattern
 white pat = case pat of
     PQuest p -> white p
     PStar _ p -> white p
@@ -38,6 +40,7 @@ white pat = case pat of
         else pat
     _ -> pat
 
+black :: Pattern -> Pattern
 black pat = case pat of
     POr ps -> POr (map black ps)
     PConcat ps -> PConcat (map black ps)
@@ -52,8 +55,8 @@ black pat = case pat of
         else PQuest $ black p
     _ -> pat
 
-parse :: String -> Pattern
-parse r = case parseRegex r of
+_parse :: String -> Pattern
+_parse r = case parseRegex r of
     Right (pattern, _) -> pattern
     Left x -> error $ show x
 

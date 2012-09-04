@@ -20,7 +20,7 @@ library
     other-modules:    Regex.Genex.Pure
     extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, mtl, containers, sbv >= 0.9.22, regex-tdfa, stream-monad, text, logict
+        base >= 3 && < 5, mtl, containers, sbv == 2.3, regex-tdfa, stream-monad == 0.4.0.1, text, logict == 0.4.2
 
 executable genex
     main-is:            Main.hs

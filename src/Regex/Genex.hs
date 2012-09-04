@@ -349,7 +349,7 @@ match s@Status{ pos, flips, captureAt, captureLen }
 displayString :: [SatResult] -> Hits -> (Hits -> IO ()) -> IO ()
 displayString [] a next = next a
 displayString (r:rs) a next = do
-    let Right (chars, rank) = getModel r
+    let Right (_, (chars, rank)) = getModel r
     putStr $ show (length (chars :: [Word8])) ++ "."
     let n = show (rank :: Word64)
     putStr (replicate (8 - length n) '0')
@@ -385,7 +385,7 @@ type ResultHandler a = [SatResult] -> Hits -> (Hits -> IO a) -> IO a
 getStringWith :: (Model -> a) -> [SatResult] -> Hits -> (Hits -> IO [a]) -> IO [a]
 getStringWith _ [] a next = next a
 getStringWith f (r:rs) a next = do
-    let Right (chars, rank) = getModel r
+    let Right (_, (chars, rank)) = getModel r
     rest <- if (a+1 >= maxHits) then return [] else
         unsafeInterleaveIO $ getStringWith f rs (a+1) next
     return (f (Model chars rank):rest)
