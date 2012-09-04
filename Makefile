@@ -1,6 +1,7 @@
 all :: install
 
 test :: binaries/osx/z3 binaries/osx/genex
+	env PATH=./binaries/osx:$$PATH genex "a(b|c)d{2,3}e*"
 	env PATH=./binaries/osx:$$PATH genex "a(b|c)d{2,3}e*\1"
 
 binaries/osx/z3 :
@@ -21,7 +22,7 @@ binaries/osx/genex :
 
 install ::
 	cabal install
-	cp ~/.cabal/bin/genex binaries/osx/
+	cp dist/build/genex/genex binaries/osx/
 	strip binaries/osx/genex
 
 ghci ::
