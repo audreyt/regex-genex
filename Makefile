@@ -1,7 +1,7 @@
 all :: install
 
 test :: binaries/osx/z3 binaries/osx/genex
-	env PATH=./binaries/osx:$$PATH genex "a(b|c)d{2,3}e*"
+	env PATH=./binaries/osx:$$PATH genex "a(b|c)d{2,3}e*\1"
 
 binaries/osx/z3 :
 	curl https://research.microsoft.com/en-us/um/redmond/projects/z3/z3-osx-4.1-x64.tar.gz | tar zxf -
@@ -17,6 +17,7 @@ binaries/osx/genex :
 	cabal configure
 	cabal build
 	cp dist/build/genex/genex binaries/osx/
+	strip binaries/osx/genex
 
 install ::
 	cabal install
