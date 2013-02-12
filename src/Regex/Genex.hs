@@ -10,7 +10,7 @@ It requires the @yices@ binary in PATH; please download it from:
 <http://yices.csl.sri.com/download-yices2.shtml>
 
 -}
-module Regex.Genex (Model(..), genex, genexPure, genexPrint, genexModels) where
+module Regex.Genex (Model(..), genex, genexPure, genexPrint, genexModels, genexWith) where
 import Data.SBV
 import Data.SBV.Internals (SBV)
 import Data.Set (toList)
@@ -30,7 +30,8 @@ import System.IO.Unsafe (unsafeInterleaveIO)
 -- | Given a list of regular repressions, returns all possible strings that matches every one of them.
 -- Guarantees to return shorter strings before longer ones.
 genex :: [String] -> IO [String]
-genex = genexWith getString
+genex = let ?maxRepeat = maxRepeatDefault
+        in genexWith getString
 
 -- | A match consists of a string (list of codepoints), and a rank representing alternation order.
 data Model = Model
@@ -41,11 +42,13 @@ data Model = Model
 
 -- | Same as 'genex', but with the entire model returned instead.
 genexModels :: [String] -> IO [Model]
-genexModels = genexWith (getStringWith id)
+genexModels = let ?maxRepeat = maxRepeatDefault
+              in genexWith (getStringWith id)
 
 -- | Same as 'genexModels', but print the models to standard output instead.
 genexPrint :: [String] -> IO ()
-genexPrint = genexWith displayString
+genexPrint = let ?maxRepeat = maxRepeatDefault
+             in genexWith displayString
 
 -- | A pure and much faster variant of 'genex', but without support for
 --   back-references, anchors or word boundaries.
@@ -65,15 +68,18 @@ type Hits = Word16
 maxHits :: Hits
 maxHits = maxBound -- 65535
 
-maxRepeat :: Int
-maxRepeat = 3 -- 7 and 15 are also good
+-- controlled by an implicit parameter, but this is the default
+-- when instantiated from functions that do not expose the implicit
+-- parameter to the user
+maxRepeatDefault :: Int
+maxRepeatDefault = 3 -- 7 and 15 are also good
 
 maxLength :: Len
 maxLength = maxBound -- 65535
 
 -- lengths p = let ?grp = mempty in IntSet.toList . fst $ runState (possibleLengths $ parse p) mempty
 
-minLen :: (?grp :: GroupLens) => Pattern -> Int
+minLen :: (?maxRepeat :: Int, ?grp :: GroupLens) => Pattern -> Int
 minLen p = case p of
     PEscape {getPatternChar = ch}
         | Data.Char.isDigit ch -> let num = charToDigit ch in
@@ -88,7 +94,7 @@ parse r = case parseRegex r of
 type GroupLens = IntMap IntSet
 type BackReferences = IntSet
 
-possibleLengths :: (?grp :: GroupLens) => Pattern -> State (GroupLens, BackReferences) IntSet
+possibleLengths :: (?maxRepeat :: Int, ?grp :: GroupLens) => Pattern -> State (GroupLens, BackReferences) IntSet
 possibleLengths pat = case pat of
     _ | isOne pat -> one
     PGroup (Just idx) p -> do
@@ -112,9 +118,9 @@ possibleLengths pat = case pat of
         | Data.Char.isAlpha ch -> error $ "Unsupported escape: " ++ [ch]
         | otherwise -> one
     PBound low (Just high) p -> manyTimes p low high
-    PBound low _ p -> manyTimes p low (low+maxRepeat)
-    PPlus p -> manyTimes p 1 (maxRepeat+1)
-    PStar _ p -> manyTimes p 0 maxRepeat
+    PBound low _ p -> manyTimes p low (low + ?maxRepeat)
+    PPlus p -> manyTimes p 1 (?maxRepeat+1)
+    PStar _ p -> manyTimes p 0 ?maxRepeat
     PEmpty -> zero
     _ -> error $ show pat
     where
@@ -136,7 +142,7 @@ possibleLengths pat = case pat of
 charToDigit :: Char -> Int
 charToDigit ch = Data.Char.ord ch - Data.Char.ord '0'
 
-exactMatch :: (?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
+exactMatch :: (?maxRepeat :: Int, ?pats :: [(Pattern, GroupLens)]) => Len -> Symbolic SBool
 exactMatch len = do
     str <- mkExistVars $ fromEnum len
     initialFlips <- mkExistVars 1
@@ -251,7 +257,7 @@ matchOne cur = case ?pat of
     isWhiteSpace = cur .== 32 ||| (9 .<= cur &&& 13 .>= cur &&& 11 ./= cur)
 
 
-match :: (?str :: Str, ?pat :: Pattern, ?grp :: GroupLens) => Status -> Status
+match :: (?maxRepeat :: Int, ?str :: Str, ?pat :: Pattern, ?grp :: GroupLens) => Status -> Status
 match s@Status{ pos, flips, captureAt, captureLen }
   | isOne ?pat = ite (pos .>= strLen) __FAIL__ one
   | otherwise = ite (pos + (toEnum $ minLen ?pat) .> strLen) __FAIL__ $ case ?pat of
@@ -300,7 +306,7 @@ match s@Status{ pos, flips, captureAt, captureLen }
           | otherwise  -> cond (ord ch .== cur)
     PBound low (Just high) p -> let s'@Status{ ok = ok' } = (let ?pat = PConcat (replicate low p) in match s) in
         if low == high then s' else ite ok' (let ?pat = p in (manyTimes s' $ high - low)) s'
-    PBound low _ p -> let ?pat = (PBound low (Just $ low+maxRepeat) p) in match s
+    PBound low _ p -> let ?pat = (PBound low (Just $ low + ?maxRepeat) p) in match s
     PPlus p ->
         let s'@Status{ok} = next p
             res = let ?pat = PStar True p in match s'
@@ -361,7 +367,7 @@ displayString (r:rs) a next = do
     where
     chr = Data.Char.chr . fromEnum
 
-genexWith :: Monoid a => ([SatResult] -> Hits -> (Hits -> IO a) -> IO a) -> [[Char]] -> IO a
+genexWith :: (?maxRepeat :: Int, Monoid a) => ([SatResult] -> Hits -> (Hits -> IO a) -> IO a) -> [[Char]] -> IO a
 genexWith f regexes = do
     let ?grp = mempty
     let p'lens = [ ((p', groupLens), lens)
@@ -373,7 +379,7 @@ genexWith f regexes = do
     let lens = IntSet.toAscList $ foldl1 IntSet.intersection (map snd p'lens)
     tryWith f (filter (<= maxLength) $ map toEnum lens) 0
 
-tryWith :: (?pats :: [(Pattern, GroupLens)]) => 
+tryWith :: (?maxRepeat :: Int, ?pats :: [(Pattern, GroupLens)]) => 
     Monoid a => ResultHandler a -> [Len] -> Hits -> IO a
 tryWith _ [] _ = return mempty
 tryWith f (len:lens) acc = if len > maxLength then return mempty else do
