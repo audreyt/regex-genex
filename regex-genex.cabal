@@ -20,14 +20,14 @@ library
     other-modules:    Regex.Genex.Pure
     extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, mtl, containers, sbv == 2.3, regex-tdfa, stream-monad, text, logict
+        base >= 3 && < 5, mtl, containers, sbv, regex-tdfa, stream-monad, text, logict
 
 executable genex
     main-is:            Main.hs
     hs-source-dirs:     . src
     extensions      : ImplicitParams, NamedFieldPuns, ParallelListComp, PatternGuards, RecordWildCards
     build-depends:
-        base >= 3 && < 5, mtl, containers, sbv == 2.3, regex-tdfa
+        base >= 3 && < 5, mtl, containers, sbv, regex-tdfa
 
 source-repository head
   type:     git

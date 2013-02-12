@@ -1,2 +1,4 @@
 binaries/osx/yices
 dist
+.*~
+tags
