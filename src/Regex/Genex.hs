@@ -6,7 +6,7 @@ of strings that matches every input regular expressions, ordered from
 shortest to longest, with full support for back references ('\1' .. '\9')
 and word boundaries ('\b').
 
-It requires the @yices@ binary in PATH; please download it from:
+It requires the @z3@ or @yices@ binary in PATH. The latter may be downloaded from:
 <http://yices.csl.sri.com/download-yices2.shtml>
 
 -}
