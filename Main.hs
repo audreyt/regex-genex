@@ -25,6 +25,8 @@ main = do
     isPure ('\\':c:cs)
         | isDigit c = False
         | otherwise = isPure cs
+    isPure ('^':_) = False
+    isPure ('$':_) = False
     isPure (_:cs) = isPure cs
 
 run :: String -> IO ()
