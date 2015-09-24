@@ -173,12 +173,12 @@ data Status = Status
     }
 
 instance Mergeable Status where
-  symbolicMerge t s1 s2 = Status
-    { ok = symbolicMerge t (ok s1) (ok s2)
-    , pos = symbolicMerge t (pos s1) (pos s2)
-    , flips = symbolicMerge t (flips s1) (flips s2)
-    , captureAt = symbolicMerge t (captureAt s1) (captureAt s2)
-    , captureLen = symbolicMerge t (captureLen s1) (captureLen s2)
+  symbolicMerge f t s1 s2 = Status
+    { ok = symbolicMerge f t (ok s1) (ok s2)
+    , pos = symbolicMerge f t (pos s1) (pos s2)
+    , flips = symbolicMerge f t (flips s1) (flips s2)
+    , captureAt = symbolicMerge f t (captureAt s1) (captureAt s2)
+    , captureLen = symbolicMerge f t (captureLen s1) (captureLen s2)
     }
 
 choice :: (?str :: Str, ?pat :: Pattern) => Flips -> [Flips -> Status] -> Status
