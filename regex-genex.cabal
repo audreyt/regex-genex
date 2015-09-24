@@ -1,5 +1,5 @@
 Name            : regex-genex
-Version         : 0.6.3
+Version         : 0.7.0
 license         : OtherLicense
 license-file    : LICENSE
 cabal-version   : >= 1.6
@@ -12,7 +12,7 @@ homepage        : https://github.com/audreyt/regex-genex
 synopsis        : From a regex, generate all possible strings it can match
 description     : From a regex, generate all possible strings it can match
 author          : Audrey Tang <audreyt@audreyt.org>
-Tested-With:    GHC==7.0.2 GHC==7.4.1
+Tested-With:    GHC==7.10.1
 
 library
     hs-source-dirs:     . src
